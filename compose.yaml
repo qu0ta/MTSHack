@@ -1,16 +1,19 @@
+
 services:
   backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: mtshack-backend
+    container_name: mtshack
     env_file:
-      - .env
+      - .env.example
     ports:
       - "8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   postgres:
@@ -19,17 +22,31 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-mtshack}
       POSTGRES_USER: ${POSTGRES_USER:-mtshack}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mtshack}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mtshack} -d ${POSTGRES_DB:-mtshack}"]
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
+
+  migrate:
+    image: migrate/migrate:v4.18.3
+    container_name: mtshack-migrate
+    volumes:
+      - ./backend/migrations:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database=postgres://${POSTGRES_USER:-mtshack}:${POSTGRES_PASSWORD:-mtshack}@postgres:5432/${POSTGRES_DB:-mtshack}?sslmode=disable"
+      - "up"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
 volumes:
   postgres_data:
