@@ -1,195 +1,338 @@
-import os
 import csv
+import os
 import re
-import glob
+import sys
+import time
 import zipfile
-import tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
+import httpx
 import numpy as np
-from openai import OpenAI
+from rank_bm25 import BM25Okapi
 
-# --- Config ---
-DATA_DIR = os.getenv("DATA_DIR", "data")
-LLM_BASE_URL = os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL") or "http://localhost:9999/v1"
-LLM_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY") or "sk-placeholder"
-LLM_MODEL = os.getenv("LLM_MODEL") or os.getenv("GEN_MODEL") or "Qwen3.8-27B"
-EMB_MODEL = os.getenv("EMB_MODEL", "BAAI/bge-m3")
-TEMPERATURE = float(os.getenv("TEMPERATURE", "0.1"))
-MAX_TOKENS = int(os.getenv("MAX_TOKENS", "500"))
-TOP_K = int(os.getenv("TOP_K", "3"))
 
-LOCAL_MODE = (LLM_BASE_URL == "http://localhost:9999/v1")
-client = OpenAI(base_url=LLM_BASE_URL, api_key=LLM_API_KEY)
+def env(name, default=""):
+    value = os.getenv(name, "").strip()
+    return default if not value or value == name else value
 
-# --- NLP ---
-RU_STOP = {"и", "в", "во", "не", "что", "он", "на", "я", "с", "со", "как", "а", "то", "все", "она", "так", "его", "но", "да", "ты", "к", "у", "же", "вы", "за", "бы", "по", "только", "ее", "мне", "было", "вот", "от", "меня", "еще", "нет", "о", "из", "ему", "теперь", "когда", "даже", "ну", "вдруг", "ли", "если", "уже", "или", "ни", "быть", "был", "него", "до", "вас", "нибудь", "опять", "уж", "вам", "ведь", "там", "потом", "себя", "ничего", "ей", "может", "они", "тут", "где", "есть", "надо", "ней", "для", "мы", "тебя", "их", "чем", "была", "сам", "чтоб", "без", "будто", "чего", "раз", "тоже", "себе", "под", "будет", "ж", "тогда", "кто", "этот", "того", "потому", "этого", "какой", "совсем", "ним", "здесь", "этом", "один", "почти", "мой", "тем", "чтобы", "нее", "сейчас", "были", "куда", "зачем", "всех", "никогда", "можно", "при", "наконец", "два", "об", "другой", "хоть", "после", "над", "больше", "тот", "через", "эти", "нас", "про", "всего", "них", "какая", "много", "разве", "три", "эту", "моя", "впрочем", "хорошо", "свою", "этой", "перед", "иногда", "лучше", "чуть", "том", "нельзя", "такой", "им", "более", "всегда", "конечно", "всю", "между", "нам", "хочу", "хотим", "хотите", "хочет", "ваш", "ваша", "ваше", "вашего", "вашем", "ваших", "наш", "наша", "наше", "нашего", "ребят", "пожалуйста"}
-_RU_ENDINGS = ("иями", "ями", "ами", "ов", "ев", "ей", "ах", "ях", "ий", "ый", "ая", "ое", "ые", "ой", "а", "я", "ы", "и", "у", "ю", "е", "о", "ь")
 
-def _stem(word):
-    if len(word) <= 4: return word
-    for end in _RU_ENDINGS:
+def number(name, default, lower, upper, kind=int):
+    try:
+        return max(lower, min(upper, kind(env(name))))
+    except ValueError:
+        return default
+
+
+DATA_DIR = Path(env("DATA_DIR", "data"))
+BASE_URL = (env("LLM_BASE_URL") or env("BASE_URL") or env("OPENAI_BASE_URL")).rstrip("/")
+LLM_KEY = env("LLM_API_KEY") or env("OPENAI_API_KEY")
+EMB_KEY = env("EMBEDDER_API_KEY") or LLM_KEY
+RERANK_KEY = env("RERANKER_API_KEY") or LLM_KEY
+LLM_MODEL = env("LLM_MODEL") or env("GEN_MODEL") or env("OPENAI_MODEL", "qwen/qwen3.8-27b")
+EMB_MODEL = env("EMB_MODEL", "baai/bge-m3")
+RERANKER_MODEL = env("RERANKER_MODEL", "qwen/qwen3-reranker-8b")
+TEMPERATURE = number("TEMPERATURE", 0.0, 0.0, 2.0, float)
+MAX_TOKENS = number("MAX_TOKENS", 1500, 600, 8192)
+MAX_WORKERS = number("MAX_WORKERS", 4, 1, 8)
+
+CHUNK_CHARS = 1100
+CANDIDATES = 24
+RERANK_POOL = 12
+FINAL_K = 5
+DEADLINE = time.time() + 17 * 60
+
+FALLBACK = (
+    "Не нашёл точного ответа в базе знаний EnergyTool. Предлагаю передать вопрос специалисту: "
+    "оставьте контакты, и менеджер уточнит детали вашей задачи."
+)
+
+SYSTEM_PROMPT = """Ты — ИИ-консультант сайта МТС EnergyTool (учёт и снижение затрат на электроэнергию, солнечные станции, поиск коммерческих потерь, выход на оптовый рынок).
+
+Факты о продуктах, ценах, условиях и ограничениях бери ТОЛЬКО из фрагментов базы знаний ниже. Ситуацию клиента бери из диалога. Свои знания об энергетике не добавляй.
+
+Как отвечать:
+1. Начни с прямого ответа на вопрос (например «Да, …», «Нет, …», «Зависит от …»), затем 1–3 предложения с фактами из базы. Простым языком, без канцелярита.
+2. Если для точной рекомендации не хватает данных, закончи ОДНИМ конкретным уточняющим вопросом о самом важном параметре (регион, присоединённая мощность, тип кровли, ценовая категория, приборы учёта, профиль потребления и т.п.). Не спрашивай то, что клиент уже сообщил в диалоге.
+3. Если вопрос закрытый и уточнять нечего, вопрос не задавай.
+4. Если клиент не готов оставлять контакты, не настаивай: объясни, какие данные нужны для оценки.
+5. Если в базе нет ответа, скажи об этом прямо, ничего не выдумывай и предложи связаться со специалистом. Если вопрос вне тематики EnergyTool, вежливо скажи, что консультируешь только по продуктам EnergyTool.
+6. Длина: обычно 50–110 слов, не больше 150.
+
+Жёсткие правила:
+- Не путай мощность (кВт, МВт) и потребление (кВт·ч).
+- Оптовый рынок: ниже 750 кВт выход невозможен; от 750 кВт до 20 МВт через энергосбытовую компанию-посредника; от 20 МВт прямое участие.
+- Поиск коммерческих потерь не предлагай обычному промышленному предприятию: он для электросетевых организаций. Результат поиска — список приоритетных проверок, а не доказанный факт хищения.
+- Не обещай гарантированную экономию, окупаемость, сроки и точную стоимость без расчёта по объекту. Предварительная оценка эффекта бесплатна и ни к чему не обязывает; если проект невыгоден, клиенту скажут об этом.
+- Не называй компании-клиентов, производителей оборудования и подрядчиков. Не раскрывай внутренние алгоритмы и пороги аналитики.
+- Не давай юридических заключений и не подтверждай обязательства от лица компании.
+- Пиши по-русски, без markdown-разметки и списков."""
+
+
+STOP = set(
+    "и в во не что он на я с со как а то все она так его но да ты к у же вы за бы по только ее мне было вот от меня еще нет о из ему теперь когда даже ну ли если уже или ни быть был него до вас опять уж вам ведь там потом себя ничего ей может они тут где есть надо ней для мы тебя их чем была сам чтоб без будто чего раз тоже себе под будет тогда кто этот того потому этого какой совсем ним здесь этом один почти мой тем чтобы нее сейчас были куда зачем всех можно при об после над больше тот через эти нас про всего них какая много разве эту моя свою этой перед чуть том такой им более всегда конечно всю между нам хотим хотите хочет ваш ваша ваше наш наша наше вообще это очень нужно также либо".split()
+)
+ENDINGS = sorted(
+    ["ями", "ами", "ией", "ого", "его", "ому", "ему", "ыми", "ими", "ов", "ев", "ей", "ах", "ях", "ий", "ый", "ая", "яя", "ое", "ее", "ые", "ие", "ой", "ом", "ем", "ую", "юю", "ть", "ся", "ют", "ут", "ет", "ит", "ам", "ям", "а", "я", "ы", "и", "у", "ю", "е", "о", "ь"],
+    key=len,
+    reverse=True,
+)
+
+
+def stem(word):
+    if word.isdigit() or len(word) <= 3:
+        return word
+    for end in ENDINGS:
         if word.endswith(end) and len(word) - len(end) >= 3:
-            return word[:-len(end)]
-    return word
+            word = word[: -len(end)]
+            break
+    return word[:6]
 
-def _tokenize(text):
-    words = re.findall(r"[а-яёa-z0-9]+", text.lower())
-    toks = []
-    for w in words:
-        if w in RU_STOP: continue
-        toks.extend([w] * 3)
-        toks.extend([_stem(w)] * 2)
-        if len(w) >= 5:
-            for i in range(len(w) - 2):
-                toks.append(w[i:i + 3])
-    return toks
 
-SOURCE_PENALTY = {"00-product-map.md": 0.55, "20-portfolio.md": 0.60, "01-numbers-and-indicators.md": 0.85, "26-general.md": 0.80}
+def tokenize(text):
+    text = text.lower().replace("ё", "е")
+    return [stem(w) for w in re.findall(r"[0-9a-zа-я]+", text) if w not in STOP and (len(w) > 1 or w.isdigit())]
 
-# --- RAG ---
-def extract_kb():
-    for path in [os.path.join(DATA_DIR, "knowledge-base.zip"), "knowledge-base.zip"]:
-        if os.path.exists(path):
-            extract_path = tempfile.mkdtemp(prefix="kb_")
-            with zipfile.ZipFile(path) as z:
-                z.extractall(extract_path)
-            return extract_path
-    if os.path.exists("rag_module/data/raw"):
-        return "rag_module/data/raw"
-    raise FileNotFoundError("knowledge-base.zip not found")
 
-def chunk_kb(raw_folder):
-    from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
-    md_splitter = MarkdownHeaderTextSplitter([("#", "Header1"), ("##", "Header2"), ("###", "Header3")])
-    txt_splitter = RecursiveCharacterTextSplitter(chunk_size=450, chunk_overlap=60)
+def find_file(*names):
+    for root in (DATA_DIR, Path(__file__).resolve().parent / DATA_DIR, Path.cwd(), Path("/tmp")):
+        for name in names:
+            path = root / name
+            if path.is_file():
+                return path
+    raise FileNotFoundError(f"Не найдены файлы: {names}")
+
+
+def split_section(text, limit):
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    parts, current = [], ""
+    for p in paragraphs:
+        if len(p) > limit:
+            sentences = re.split(r"(?<=[.!?;])\s+", p)
+        else:
+            sentences = [p]
+        for s in sentences:
+            if current and len(current) + len(s) + 2 > limit:
+                parts.append(current)
+                current = ""
+            current = f"{current}\n{s}" if current else s
+    if current:
+        parts.append(current)
+    return parts
+
+
+def load_chunks(path):
     chunks = []
-    files = glob.glob(f"{raw_folder}/**/*.md", recursive=True) + glob.glob(f"{raw_folder}/**/*.txt", recursive=True)
-    for fp in files:
-        fname = os.path.basename(fp)
-        with open(fp, "r", encoding="utf-8") as f:
-            text = f.read()
-        for ch in txt_splitter.split_documents(md_splitter.split_text(text)):
-            chunks.append({"text": ch.page_content, "metadata": {**ch.metadata, "source": fname}})
+    with zipfile.ZipFile(path) as archive:
+        for name in sorted(archive.namelist()):
+            if name.startswith("__MACOSX/") or Path(name).suffix.lower() not in (".md", ".txt"):
+                continue
+            text = archive.read(name).decode("utf-8-sig", errors="replace")
+            source = Path(name).name
+            stack = {}
+            sections = []
+            body = []
+            for line in text.splitlines():
+                m = re.match(r"^(#{1,4})\s+(.*)", line)
+                if m:
+                    if "".join(body).strip():
+                        sections.append((" > ".join(stack[k] for k in sorted(stack)), "\n".join(body)))
+                    body = []
+                    level = len(m.group(1))
+                    stack = {k: v for k, v in stack.items() if k < level}
+                    stack[level] = m.group(2).strip()
+                else:
+                    body.append(line)
+            if "".join(body).strip():
+                sections.append((" > ".join(stack[k] for k in sorted(stack)), "\n".join(body)))
+            for title, content in sections:
+                for part in split_section(content, CHUNK_CHARS):
+                    head = f"{source} | {title}" if title else source
+                    chunks.append({"source": source, "title": title, "text": f"[{head}]\n{part}"})
+    if not chunks:
+        raise ValueError("База знаний пуста")
     return chunks
 
-def get_embeddings(texts):
-    if LOCAL_MODE: raise RuntimeError("Local mode")
-    batch = 32
+
+def post(client, endpoint, key, body, attempts=3):
+    if not BASE_URL or not key:
+        raise ValueError("Не заданы адрес API или ключ")
+    last = None
+    for attempt in range(attempts):
+        try:
+            response = client.post(BASE_URL + endpoint, headers={"Authorization": "Bearer " + key}, json=body)
+            if response.status_code in (429, 500, 502, 503, 504):
+                raise httpx.HTTPStatusError("retry", request=response.request, response=response)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as exc:
+            last = exc
+            if exc.response.status_code not in (429, 500, 502, 503, 504):
+                raise
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            last = exc
+        time.sleep(min(1.5 * (attempt + 1), 5))
+    raise last
+
+
+def embed(client, texts):
     out = []
-    for i in range(0, len(texts), batch):
-        r = client.embeddings.create(input=texts[i:i+batch], model=EMB_MODEL)
-        out.extend([d.embedding for d in r.data])
-    return np.array(out, dtype=np.float32)
+    for i in range(0, len(texts), 32):
+        result = post(client, "/embeddings", EMB_KEY, {"model": EMB_MODEL, "input": texts[i : i + 32]})
+        items = sorted(result["data"], key=lambda d: d.get("index", 0))
+        out.extend(item["embedding"] for item in items)
+    matrix = np.array(out, dtype=np.float32)
+    matrix /= np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-9
+    return matrix
 
-def build_index(chunks):
-    from rank_bm25 import BM25Okapi
-    indexed = []
-    for c in chunks:
-        headers = [c["metadata"].get(k) for k in ("Header1", "Header2", "Header3") if c["metadata"].get(k)]
-        prefix = " ".join(headers)
-        indexed.append(f"{prefix}\n{c['text']}" if prefix else c["text"])
-    bm25 = BM25Okapi([_tokenize(t) for t in indexed])
-    faiss_index = None
-    if not LOCAL_MODE:
+
+class Index:
+    def __init__(self, chunks, client):
+        self.chunks = chunks
+        self.bm25 = BM25Okapi([tokenize(c["title"] + " " + c["text"]) for c in chunks])
+        self.vectors = None
         try:
-            import faiss
-            embs = get_embeddings([c["text"] for c in chunks])
-            faiss.normalize_L2(embs)
-            faiss_index = faiss.IndexFlatIP(embs.shape[1])
-            faiss_index.add(embs)
-        except Exception:
-            pass
-    return {"bm25": bm25, "chunks": chunks, "faiss": faiss_index}
+            self.vectors = embed(client, [c["text"] for c in chunks])
+        except Exception as exc:
+            print(f"Эмбеддинги недоступны: {type(exc).__name__}: {exc}", file=sys.stderr)
 
-def retrieve(query, index, top_k=3):
-    bm25_scores = index["bm25"].get_scores(_tokenize(query))
-    penalties = np.array([SOURCE_PENALTY.get(c["metadata"].get("source", ""), 1.0) for c in index["chunks"]])
-    bm25_scores = bm25_scores * penalties
-    bm25_top = np.argsort(bm25_scores)[::-1][:top_k * 4]
-    faiss_top = []
-    if index["faiss"] is not None:
+    def search(self, client, query, dense_query):
+        scores = self.bm25.get_scores(tokenize(query))
+        ranked = [int(i) for i in np.argsort(scores)[::-1][:CANDIDATES] if scores[i] > 0]
+        dense = []
+        if self.vectors is not None:
+            try:
+                q = embed(client, [dense_query])[0]
+                dense = [int(i) for i in np.argsort(self.vectors @ q)[::-1][:CANDIDATES]]
+            except Exception as exc:
+                print(f"Эмбеддинг запроса: {type(exc).__name__}", file=sys.stderr)
+        rrf = {}
+        for lst, weight in ((ranked, 1.0), (dense, 1.2)):
+            for rank, i in enumerate(lst):
+                rrf[i] = rrf.get(i, 0.0) + weight / (60 + rank)
+        pool = [i for i, _ in sorted(rrf.items(), key=lambda x: x[1], reverse=True)][:RERANK_POOL]
+        if not pool:
+            return []
         try:
-            import faiss
-            q = get_embeddings([query])
-            faiss.normalize_L2(q)
-            _, idx = index["faiss"].search(q, top_k * 4)
-            faiss_top = idx[0].tolist()
-        except Exception: pass
-    k = 60
-    rrf = {}
-    for rank, i in enumerate(bm25_top): rrf[i] = rrf.get(i, 0) + 1.0 / (k + rank + 1)
-    for rank, i in enumerate(faiss_top): rrf[i] = rrf.get(i, 0) + 1.0 / (k + rank + 1)
-    sorted_idx = sorted(rrf.keys(), key=lambda x: rrf[x], reverse=True)[:top_k]
-    return [index["chunks"][i] for i in sorted_idx]
+            result = post(
+                client,
+                "/rerank",
+                RERANK_KEY,
+                {
+                    "model": RERANKER_MODEL,
+                    "query": dense_query,
+                    "documents": [self.chunks[i]["text"] for i in pool],
+                    "top_n": min(FINAL_K, len(pool)),
+                },
+                attempts=2,
+            )
+            entries = result.get("results", result.get("data", []))
+            order = [pool[int(e["index"])] for e in entries if 0 <= int(e["index"]) < len(pool)]
+            if order:
+                return [self.chunks[i] for i in order[:FINAL_K]]
+        except Exception as exc:
+            print(f"Реранкер недоступен: {type(exc).__name__}", file=sys.stderr)
+        return [self.chunks[i] for i in pool[:FINAL_K]]
 
-# --- LLM ---
-SYSTEM_PROMPT = """Ты — ИИ-консультант МТС EnergyTool.
-Отвечай на вопрос, используя ТОЛЬКО контекст ниже. Если ответа нет — скажи: "Я специализируюсь только на продуктах EnergyTool. Давайте передам вопрос специалисту." До 150 слов.
 
-КОНТЕКСТ:
-{context}"""
+TURN = re.compile(r"^\s*(Пользователь|Клиент|Ассистент|Бот|User|Assistant)\s*:\s*", re.IGNORECASE | re.MULTILINE)
 
-def generate_answer(question, chunks):
-    if LOCAL_MODE:
-        return "Техническая ошибка. Свяжитесь со специалистом." # Silent fallback
-    
-    context = "\n\n---\n\n".join(f"[{c['metadata'].get('source', '?')}]\n{c['text']}" for c in chunks) if chunks else "Нет контекста."
-    prompt = SYSTEM_PROMPT.format(context=context)
-    
-    try:
-        resp = client.chat.completions.create(
-            model=LLM_MODEL,
-            messages=[{"role": "system", "content": prompt}, {"role": "user", "content": question}],
-            temperature=TEMPERATURE, max_tokens=MAX_TOKENS,
-        )
-        ans = resp.choices[0].message.content.strip()
-    except Exception:
-        ans = "Извините, произошла техническая ошибка. Свяжитесь со специалистом."
-    
-    return ans if ans else "Свяжитесь со специалистом для получения ответа."
 
-# --- Main ---
+def parse_dialog(question):
+    parts = TURN.split(question)
+    if len(parts) < 3:
+        return [("user", question.strip())]
+    turns = []
+    for role, text in zip(parts[1::2], parts[2::2]):
+        turns.append(("user" if role.lower() in ("пользователь", "клиент", "user") else "assistant", text.strip()))
+    return [t for t in turns if t[1]] or [("user", question.strip())]
+
+
+def build_queries(turns):
+    users = [t for r, t in turns if r == "user"]
+    last = users[-1]
+    earlier = " ".join(users[:-1])
+    bm25_query = f"{last} {earlier} {earlier}".strip()
+    dense_query = f"{earlier} {last}".strip() if earlier else last
+    return bm25_query, dense_query
+
+
+def clean(answer):
+    answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL)
+    answer = re.sub(r"^.*</think>", "", answer, flags=re.DOTALL)
+    answer = re.sub(r"[*#`]+", "", answer)
+    return " ".join(answer.split())
+
+
+def generate(client, turns, chunks):
+    context = "\n\n".join(c["text"] for c in chunks) or "Фрагменты не найдены."
+    if len(turns) == 1:
+        dialog = turns[0][1]
+        task = f"Вопрос клиента:\n{dialog}"
+    else:
+        dialog = "\n".join(("Клиент: " if r == "user" else "Консультант: ") + t for r, t in turns)
+        task = f"Диалог:\n{dialog}\n\nОтветь на последнюю реплику клиента с учётом диалога."
+    payload = {
+        "model": LLM_MODEL,
+        "temperature": TEMPERATURE,
+        "max_tokens": MAX_TOKENS,
+        "messages": [
+            {"role": "system", "content": SYSTEM_PROMPT + "\n\nФРАГМЕНТЫ БАЗЫ ЗНАНИЙ:\n" + context},
+            {"role": "user", "content": task},
+        ],
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    for attempt in range(2):
+        try:
+            result = post(client, "/chat/completions", LLM_KEY, payload)
+            answer = clean(result["choices"][0]["message"].get("content") or "")
+            if answer:
+                return answer[:9000]
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 400 and "chat_template_kwargs" in payload:
+                payload.pop("chat_template_kwargs")
+                continue
+            print(f"LLM: HTTP {exc.response.status_code}", file=sys.stderr)
+        except Exception as exc:
+            print(f"LLM попытка {attempt + 1}: {type(exc).__name__}", file=sys.stderr)
+    return FALLBACK
+
+
 def main():
-    qpath = None
-    for p in [os.path.join(DATA_DIR, "questions.csv"), "questions.csv", "/tmp/questions.csv"]:
-        if os.path.exists(p):
-            qpath = p
-            break
+    questions_path = find_file("questions.csv", "train.csv")
+    kb_path = find_file("knowledge-base.zip", "knowledge_base.zip", "kb.zip")
+    with questions_path.open(encoding="utf-8-sig", newline="") as f:
+        questions = [(str(r["id"]).strip(), str(r["question"])) for r in csv.DictReader(f)]
+    chunks = load_chunks(kb_path)
+    with httpx.Client(timeout=90) as client:
+        index = Index(chunks, client)
+    print(f"Вопросов: {len(questions)}; чанков: {len(chunks)}; dense: {index.vectors is not None}", flush=True)
 
-    if not qpath:
-        raise FileNotFoundError(f"questions.csv not found. DATA_DIR={DATA_DIR}")
-
-    questions = []
-    with open(qpath, "r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            clean = {k.strip().lower(): (v or "").strip() for k, v in row.items() if k}
-            if clean.get("id") and clean.get("question"):
-                questions.append(clean)
-
-    raw = extract_kb()
-    chunks = chunk_kb(raw)
-    index = build_index(chunks)
-
-    answers = []
-    for q in questions:
+    def work(question):
+        if time.time() > DEADLINE:
+            return FALLBACK
         try:
-            ctx = retrieve(q["question"], index, top_k=TOP_K)
-            ans = generate_answer(q["question"], ctx)
-        except Exception:
-            ans = "Техническая ошибка. Свяжитесь со специалистом."
-        answers.append({"id": q["id"], "answer": ans})
+            turns = parse_dialog(question)
+            bm25_query, dense_query = build_queries(turns)
+            with httpx.Client(timeout=90) as client:
+                found = index.search(client, bm25_query, dense_query)
+                return generate(client, turns, found)
+        except Exception as exc:
+            print(f"Ошибка вопроса: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return FALLBACK
 
-    # Validation
-    if len(answers) != len(questions):
-        raise ValueError("Mismatch in answer/question count.")
-    for a in answers:
-        if not a["answer"].strip():
-            raise ValueError("Empty answer found.")
+    answers = [FALLBACK] * len(questions)
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = {pool.submit(work, q): i for i, (_, q) in enumerate(questions)}
+        for future in as_completed(futures):
+            answers[futures[future]] = future.result()
 
     with open("submission.csv", "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["id", "answer"], quoting=csv.QUOTE_ALL, lineterminator="\n")
-        writer.writeheader()
-        writer.writerows(answers)
+        writer = csv.writer(f, quoting=csv.QUOTE_ALL, lineterminator="\n")
+        writer.writerow(["id", "answer"])
+        writer.writerows((qid, answers[i] or FALLBACK) for i, (qid, _) in enumerate(questions))
+    print(f"Готов submission.csv: {len(questions)} ответов", flush=True)
+
 
 if __name__ == "__main__":
     main()
