@@ -99,14 +99,33 @@ def enrich_for_bm25(chunk: dict) -> str:
     return f"{header_str}\n{chunk['text']}" if header_str else chunk["text"]
 
 
+_local_model = None
+
 def get_embeddings(texts: list) -> np.ndarray:
-    batch_size = 32
-    all_emb = []
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i:i + batch_size]
-        resp = client.embeddings.create(input=batch, model=EMB_MODEL)
-        all_emb.extend([d.embedding for d in resp.data])
-    return np.array(all_emb, dtype=np.float32)
+    """Get embeddings either from local model (dev) or API (platform)."""
+    global _local_model
+    
+    api_key = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+    base_url = os.getenv("LLM_BASE_URL") or os.getenv("OPENAI_BASE_URL")
+    
+    if api_key and base_url and "localhost:9999" not in base_url:
+        batch_size = 32
+        all_embeddings = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i + batch_size]
+            response = client.embeddings.create(input=batch, model=EMB_MODEL)
+            all_embeddings.extend([data.embedding for data in response.data])
+        return np.array(all_embeddings, dtype=np.float32)
+        
+    else:
+        if _local_model is None:
+            print("[retriever] Loading local BAAI/bge-m3 model (this may take a minute)...")
+            from sentence_transformers import SentenceTransformer
+            _local_model = SentenceTransformer("BAAI/bge-m3")
+        
+        print(f"[retriever] Encoding {len(texts)} texts locally...")
+        embeddings = _local_model.encode(texts, normalize_embeddings=True)
+        return np.array(embeddings, dtype=np.float32)
 
 
 class Retriever:

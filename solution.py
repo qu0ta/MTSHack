@@ -192,7 +192,6 @@ def retrieve(query: str, index: dict, top_k: int = 3) -> list:
     return [index["chunks"][i] for i in sorted_idx]
 
 
-# NOTE: Replace this prompt with the one from your team lead!
 SYSTEM_PROMPT = """Ты — ИИ-консультант МТС EnergyTool.
 Отвечай на вопрос пользователя, используя ТОЛЬКО предоставленный контекст.
 Если в контексте нет ответа — скажи: "Я специализируюсь только на продуктах EnergyTool. Давайте передам вопрос специалисту."
@@ -237,23 +236,52 @@ def generate_answer(question: str, chunks: list) -> str:
                 raise
             print(f"[solution] LLM error (attempt {attempt + 1}): {e}")
 
+def find_questions_file():
+    """Ищем questions.csv в нескольких местах."""
+    candidates = [
+        os.path.join(DATA_DIR, "questions.csv"),
+        "questions.csv",
+        os.path.join("data", "questions.csv"),
+        "/tmp/questions.csv",
+        "./questions.csv",
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            print(f"[solution] Found questions at: {p}")
+            return p
+    return None
+
+
 def main():
-    
-    qpath = os.path.join(DATA_DIR, "questions.csv")
-    if not os.path.exists(qpath):
-        qpath = "rag_module/data/demo_questions.csv"
+    # 1. Ищем вопросы
+    qpath = find_questions_file()
+    if not qpath:
+        print("[solution] ERROR: questions.csv not found anywhere!")
+        print(f"[solution] DATA_DIR = {DATA_DIR}")
+        if os.path.exists(DATA_DIR):
+            print(f"[solution] Files in DATA_DIR: {os.listdir(DATA_DIR)}")
+        print(f"[solution] Files in CWD: {os.listdir('.')}")
+        # Создаем пустой submission, чтобы платформа не падала с другой ошибкой
+        with open("submission.csv", "w", encoding="utf-8", newline="") as f:
+            w = csv.writer(f, quoting=csv.QUOTE_ALL)
+            w.writerow(["id", "answer"])
+        return
+
     with open(qpath, "r", encoding="utf-8-sig") as f:
         questions = [dict(r) for r in csv.DictReader(f)]
     print(f"[solution] {len(questions)} questions from {qpath}")
 
+    # 2. Строим базу знаний
     raw = extract_kb()
     chunks = chunk_kb(raw)
     print(f"[solution] {len(chunks)} chunks")
 
+    # 3. Индекс
     index = build_index(chunks, use_faiss=True)
     mode = "BM25+FAISS" if index["faiss"] is not None else "BM25 only"
     print(f"[solution] Index ready ({mode})")
 
+    # 4. Обрабатываем вопросы
     answers = []
     for q in questions:
         qid = q["id"]
@@ -268,12 +296,12 @@ def main():
         answers.append({"id": qid, "answer": ans})
         print(f"[solution] Q{qid}: {ans[:80]}...")
 
+    # 5. Сохраняем
     with open("submission.csv", "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["id", "answer"], quoting=csv.QUOTE_ALL)
         w.writeheader()
         w.writerows(answers)
     print(f"[solution] ✓ submission.csv saved ({len(answers)} rows)")
 
-
 if __name__ == "__main__":
-    main()
+    main()  
