@@ -1,20 +1,12 @@
-"""
-Evaluate retrieval quality against the demo questions.
-Measures accuracy@k: how often the correct source file is in top-k.
-"""
-
 import os
 import csv
 import sys
 import numpy as np
 from rag_module import retriever as retriever_module
 
-# --- Mock embeddings for offline evaluation ---
 def mock_get_embeddings(texts):
     return np.random.rand(len(texts), 1024).astype(np.float32)
 
-# --- Ground truth: which source file(s) should answer each demo question ---
-# Multiple sources allowed per question (they answer different facets).
 GROUND_TRUTH = {
     1:  ["23-solar.md"],
     2:  ["23-solar.md"],
@@ -28,7 +20,6 @@ GROUND_TRUTH = {
     10: ["14-tariffs.md", "11-price-categories.md"],
     11: ["17-faq.md"],
     12: ["21-orem.md"],
-    # Q13: "если расчёт покажет невыгодно" — принцип работы, отвечают многие файлы
     13: [
         "03-calculation-and-requests.md",
         "21-orem.md",
@@ -40,7 +31,6 @@ GROUND_TRUTH = {
     15: ["22-askue.md"],
     16: ["24-losses.md"],
     17: ["11-price-categories.md", "14-tariffs.md"],
-    # Q18: "автоматический учёт на складах, что нужно для оценки" — про платформу учёта и данные
     18: [
         "03-calculation-and-requests.md",
         "22-askue.md",
@@ -76,7 +66,7 @@ def find_questions_file() -> str:
 
 
 def main():
-    # Patch embeddings (offline evaluation)
+    
     retriever_module.get_embeddings = mock_get_embeddings
 
     print("Loading Retriever (BM25 only)...")

@@ -18,7 +18,6 @@ client = OpenAI(
 )
 EMB_MODEL = os.getenv("EMB_MODEL", "BAAI/bge-m3")
 
-# --- Russian stop words (minimal, high-frequency noise) ---------------------
 RU_STOP = {
     "и", "в", "во", "не", "что", "он", "на", "я", "с", "со", "как", "а", "то",
     "все", "она", "так", "его", "но", "да", "ты", "к", "у", "же", "вы", "за",
@@ -40,17 +39,13 @@ RU_STOP = {
     "вашем", "ваших", "наш", "наша", "наше", "нашего", "ребят", "пожалуйста",
 }
 
-# --- Penalty for summary/overview documents ---------------------------------
-# These files duplicate answers from detailed product files but rarely
-# contain the actionable details. Down-weight them.
 SOURCE_PENALTY = {
     "00-product-map.md": 0.55,
     "20-portfolio.md": 0.60,
-    "01-numbers-and-indicators.md": 0.85,   # keep: holds real numbers
-    "26-general.md": 0.80,                   # general FAQ, not product-specific
+    "01-numbers-and-indicators.md": 0.85,
+    "26-general.md": 0.80,
 }
 
-# --- Russian stemmer (simplified Porter) ------------------------------------
 _RU_ENDINGS = (
     "иями", "ями", "ами", "ов", "ев", "ей", "ах", "ях",
     "ий", "ый", "ая", "ое", "ые", "ой", "ей",
@@ -82,8 +77,6 @@ def tokenize_ru(text: str) -> list:
                 tokens.append(w[i:i + 3])
     return tokens
 
-
-# --- Core -------------------------------------------------------------------
 
 def load_chunks(chunks_path: str) -> list:
     if not os.path.exists(chunks_path):
@@ -128,7 +121,6 @@ class Retriever:
         indexed_texts = [enrich_for_bm25(c) for c in self.chunks]
         self.bm25 = BM25Okapi([tokenize_ru(t) for t in indexed_texts])
 
-        # Pre-compute source penalty per chunk
         self.penalties = np.array([
             SOURCE_PENALTY.get(c["metadata"].get("source", ""), 1.0)
             for c in self.chunks
@@ -144,12 +136,11 @@ class Retriever:
             print(f"[retriever] FAISS: {self.faiss_index.ntotal} vectors.")
 
     def retrieve_documents(self, query: str, top_k: int = 3) -> list:
-        # 1. BM25 with source penalty
+        
         bm25_scores = self.bm25.get_scores(tokenize_ru(query))
         bm25_scores = bm25_scores * self.penalties
         bm25_top = np.argsort(bm25_scores)[::-1][:top_k * 4]
 
-        # 2. FAISS (optional)
         faiss_top = []
         if self.use_faiss:
             q_emb = get_embeddings([query])
@@ -157,7 +148,6 @@ class Retriever:
             _, faiss_idx = self.faiss_index.search(q_emb, top_k * 4)
             faiss_top = faiss_idx[0].tolist()
 
-        # 3. RRF
         k = 60
         rrf = {}
         for rank, idx in enumerate(bm25_top):

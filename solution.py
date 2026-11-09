@@ -1,14 +1,3 @@
-"""
-solution.py — entry point for automatic evaluation.
-
-Flow:
-1. Read questions.csv from DATA_DIR
-2. Extract knowledge-base.zip
-3. Chunk + index KB (BM25 + optional FAISS)
-4. For each question: retrieve context -> call LLM -> save answer
-5. Write submission.csv
-"""
-
 import os
 import csv
 import glob
@@ -19,7 +8,6 @@ import tempfile
 import numpy as np
 from openai import OpenAI
 
-# --- Config ---
 DATA_DIR = os.getenv("DATA_DIR", "data")
 LLM_MODEL = os.getenv("LLM_MODEL") or os.getenv("GEN_MODEL") or "Qwen3.8-27B"
 EMB_MODEL = os.getenv("EMB_MODEL", "BAAI/bge-m3")
@@ -27,12 +15,10 @@ TEMPERATURE = float(os.getenv("TEMPERATURE", "0.1"))
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "500"))
 TOP_K = int(os.getenv("TOP_K", "3"))
 
-# Local dev has no API keys — use placeholders so the client can init.
-# On the platform, LLM_BASE_URL / LLM_API_KEY are set automatically.
 LLM_BASE_URL = (
     os.getenv("LLM_BASE_URL")
     or os.getenv("OPENAI_BASE_URL")
-    or "http://localhost:9999/v1"   # unreachable placeholder
+    or "http://localhost:9999/v1"
 )
 LLM_API_KEY = (
     os.getenv("LLM_API_KEY")
@@ -42,13 +28,10 @@ LLM_API_KEY = (
 
 client = OpenAI(base_url=LLM_BASE_URL, api_key=LLM_API_KEY)
 
-# Detect local mode: if the base URL is the placeholder, FAISS/LLM
-# calls will fail — we'll gracefully fall back to BM25-only.
 LOCAL_MODE = LLM_BASE_URL == "http://localhost:9999/v1"
 if LOCAL_MODE:
     print("[solution] LOCAL MODE: no API key — using BM25-only, LLM calls disabled")
 
-# --- Russian tokenizer ---
 RU_STOP = {
     "и", "в", "во", "не", "что", "на", "я", "с", "как", "а", "то", "все",
     "она", "так", "его", "но", "да", "к", "у", "же", "вы", "за", "бы", "по",
@@ -100,7 +83,6 @@ SOURCE_PENALTY = {
 }
 
 
-# --- Knowledge base ---
 def extract_kb() -> str:
     kb_zip = os.path.join(DATA_DIR, "knowledge-base.zip")
     if os.path.exists(kb_zip):
@@ -108,7 +90,7 @@ def extract_kb() -> str:
         with zipfile.ZipFile(kb_zip) as z:
             z.extractall(extract_path)
         return extract_path
-    # Local dev fallback
+    
     fallback = "rag_module/data/raw"
     if os.path.exists(fallback):
         return fallback
@@ -199,7 +181,6 @@ def retrieve(query: str, index: dict, top_k: int = 3) -> list:
         except Exception:
             pass
 
-    # Reciprocal Rank Fusion
     k = 60
     rrf = {}
     for rank, i in enumerate(bm25_top):
@@ -211,7 +192,6 @@ def retrieve(query: str, index: dict, top_k: int = 3) -> list:
     return [index["chunks"][i] for i in sorted_idx]
 
 
-# --- LLM generation ---
 # NOTE: Replace this prompt with the one from your team lead!
 SYSTEM_PROMPT = """Ты — ИИ-консультант МТС EnergyTool.
 Отвечай на вопрос пользователя, используя ТОЛЬКО предоставленный контекст.
@@ -230,7 +210,7 @@ SYSTEM_PROMPT = """Ты — ИИ-консультант МТС EnergyTool.
 
 
 def generate_answer(question: str, chunks: list) -> str:
-    # Local mode: return context preview instead of calling LLM
+    
     if LOCAL_MODE:
         preview = chunks[0]["text"][:150].replace("\n", " ") if chunks else "N/A"
         return f"[LOCAL MOCK] Based on {chunks[0]['metadata'].get('source', '?')}: {preview}..."
@@ -257,9 +237,8 @@ def generate_answer(question: str, chunks: list) -> str:
                 raise
             print(f"[solution] LLM error (attempt {attempt + 1}): {e}")
 
-# --- Main ---
 def main():
-    # 1. Load questions
+    
     qpath = os.path.join(DATA_DIR, "questions.csv")
     if not os.path.exists(qpath):
         qpath = "rag_module/data/demo_questions.csv"
@@ -267,17 +246,14 @@ def main():
         questions = [dict(r) for r in csv.DictReader(f)]
     print(f"[solution] {len(questions)} questions from {qpath}")
 
-    # 2. Build KB
     raw = extract_kb()
     chunks = chunk_kb(raw)
     print(f"[solution] {len(chunks)} chunks")
 
-    # 3. Index (try FAISS first, fallback to BM25-only)
     index = build_index(chunks, use_faiss=True)
     mode = "BM25+FAISS" if index["faiss"] is not None else "BM25 only"
     print(f"[solution] Index ready ({mode})")
 
-    # 4. Process each question
     answers = []
     for q in questions:
         qid = q["id"]
@@ -292,7 +268,6 @@ def main():
         answers.append({"id": qid, "answer": ans})
         print(f"[solution] Q{qid}: {ans[:80]}...")
 
-    # 5. Save submission
     with open("submission.csv", "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=["id", "answer"], quoting=csv.QUOTE_ALL)
         w.writeheader()
