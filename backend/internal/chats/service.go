@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
 )
 
 type ChatRepository interface {
@@ -19,6 +21,7 @@ type ChatService interface {
 	Create(ctx context.Context, title *string) (*Chat, error)
 	GetByID(ctx context.Context, id string) (*Chat, error)
 	List(ctx context.Context, limit, offset int) ([]Chat, error)
+	Count(ctx context.Context) (int64, error)
 	UpdateTitle(ctx context.Context, id, title string) (*Chat, error)
 	Close(ctx context.Context, id string) (*Chat, error)
 }
@@ -42,23 +45,46 @@ func (s *Service) Create(ctx context.Context, title *string) (*Chat, error) {
 }
 
 func (s *Service) GetByID(ctx context.Context, id string) (*Chat, error) {
-	//TODO implement me
-	panic("implement me")
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, ErrInvalidChatID
+	}
+	return s.repo.GetByID(ctx, id)
 }
 
 func (s *Service) List(ctx context.Context, limit, offset int) ([]Chat, error) {
-	//TODO implement me
-	panic("implement me")
+	if limit < 1 || limit > 100 || offset < 0 {
+		return nil, ErrInvalidPagination
+	}
+	return s.repo.List(ctx, limit, offset)
+}
+
+func (s *Service) Count(ctx context.Context) (int64, error) {
+	return s.repo.Count(ctx)
 }
 
 func (s *Service) UpdateTitle(ctx context.Context, id, title string) (*Chat, error) {
-	//TODO implement me
-	panic("implement me")
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, ErrInvalidChatID
+	}
+	trimmed := strings.TrimSpace(title)
+	if trimmed == "" || utf8.RuneCountInString(trimmed) > 255 {
+		return nil, ErrInvalidTitle
+	}
+	return s.repo.UpdateTitle(ctx, id, trimmed)
 }
 
 func (s *Service) Close(ctx context.Context, id string) (*Chat, error) {
-	//TODO implement me
-	panic("implement me")
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, ErrInvalidChatID
+	}
+	return s.repo.Close(ctx, id)
+}
+
+func (s *Service) Touch(ctx context.Context, id string) error {
+	if _, err := uuid.Parse(id); err != nil {
+		return ErrInvalidChatID
+	}
+	return s.repo.Touch(ctx, id)
 }
 
 func NewService(repo ChatRepository) *Service {

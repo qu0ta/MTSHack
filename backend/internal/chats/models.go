@@ -5,8 +5,12 @@ import (
 	"time"
 )
 
-var ErrChatNotFound = errors.New("chat not found")
-var ErrInvalidTitle = errors.New("invalid chat title")
+var (
+	ErrChatNotFound      = errors.New("chat not found")
+	ErrInvalidChatID     = errors.New("invalid chat id")
+	ErrInvalidPagination = errors.New("invalid pagination parameters")
+	ErrInvalidTitle      = errors.New("invalid chat title")
+)
 
 type Chat struct {
 	ID        string     `db:"id" json:"id"`
