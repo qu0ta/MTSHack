@@ -13,6 +13,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/qu0ta/MTSHack/internal/chats"
+	"github.com/qu0ta/MTSHack/internal/messages"
 	"github.com/qu0ta/MTSHack/internal/platform"
 )
 
@@ -25,13 +26,18 @@ func main() {
 	}
 	defer db.Close()
 
-	repository := chats.NewPostgresRepository(db)
-	service := chats.NewService(repository)
-	handler := chats.NewHandler(service)
+	chatRepository := chats.NewPostgresRepository(db)
+	chatService := chats.NewService(chatRepository)
+	chatHandler := chats.NewHandler(chatService)
+
+	messageRepository := messages.NewPostgresRepository(db)
+	messageService := messages.NewMessageService(messageRepository)
+	messageHandler := messages.NewHandler(messageService, chatService)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", health)
-	handler.RegisterRoutes(mux)
+	chatHandler.RegisterRoutes(mux)
+	messageHandler.RegisterRoutes(mux)
 
 	addr := os.Getenv("HTTP_ADDR")
 	if addr == "" {
