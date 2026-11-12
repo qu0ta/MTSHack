@@ -4,152 +4,174 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 )
 
+const maxRequestBodyBytes = 16 << 10
+
 type Handler struct {
 	service ChatService
+}
+
+type createChatRequest struct {
+	Title *string `json:"title"`
+}
+
+type updateTitleRequest struct {
+	Title *string `json:"title"`
+}
+
+type listChatsResponse struct {
+	Chats  []Chat `json:"chats"`
+	Total  int64  `json:"total"`
+	Limit  int    `json:"limit"`
+	Offset int    `json:"offset"`
 }
 
 func NewHandler(service ChatService) *Handler {
 	return &Handler{service: service}
 }
 
-func matchServiceError(w http.ResponseWriter, err error) {
-	switch {
-	case errors.Is(err, ErrChatNotFound):
-		http.Error(w, ErrChatNotFound.Error(), http.StatusNotFound)
-	case errors.Is(err, ErrInvalidChatID):
-		http.Error(w, ErrInvalidChatID.Error(), http.StatusBadRequest)
-	case errors.Is(err, ErrInvalidPagination):
-		http.Error(w, ErrInvalidPagination.Error(), http.StatusBadRequest)
-	case errors.Is(err, ErrInvalidTitle):
-		http.Error(w, ErrInvalidTitle.Error(), http.StatusBadRequest)
-	default:
-		log.Printf("internal service error: %v", err)
-		http.Error(w, "Server error", http.StatusInternalServerError)
-	}
+func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/v1/chats", h.Create)
+	mux.HandleFunc("GET /api/v1/chats", h.List)
+	mux.HandleFunc("GET /api/v1/chats/{id}", h.GetByID)
+	mux.HandleFunc("PATCH /api/v1/chats/{id}", h.UpdateTitle)
+	mux.HandleFunc("POST /api/v1/chats/{id}/close", h.Close)
 }
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
-	var req *CreateChatRequest
-	if !decodeChatJSON(w, r, &req) {
+	var req createChatRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req == nil {
-		http.Error(w, "JSON object is required", http.StatusBadRequest)
-		return
-	}
+
 	chat, err := h.service.Create(r.Context(), req.Title)
 	if err != nil {
-		matchServiceError(w, err)
+		writeServiceError(w, err)
 		return
 	}
-	writeChatJSON(w, http.StatusCreated, chat)
+
+	writeJSON(w, http.StatusCreated, chat)
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	limit, offset := 20, 0
-	query := r.URL.Query()
-	if query.Has("limit") {
-		value, err := strconv.Atoi(query.Get("limit"))
-		if err != nil {
-			matchServiceError(w, ErrInvalidPagination)
-			return
-		}
-		limit = value
-	}
-	if query.Has("offset") {
-		value, err := strconv.Atoi(query.Get("offset"))
-		if err != nil {
-			matchServiceError(w, ErrInvalidPagination)
-			return
-		}
-		offset = value
-	}
-	if limit < 1 || limit > 100 || offset < 0 {
-		matchServiceError(w, ErrInvalidPagination)
+	limit, err := parseQueryInt(r, "limit", 20)
+	if err != nil {
+		http.Error(w, ErrInvalidPagination.Error(), http.StatusBadRequest)
 		return
 	}
-	chats, err := h.service.List(r.Context(), limit, offset)
+	offset, err := parseQueryInt(r, "offset", 0)
 	if err != nil {
-		matchServiceError(w, err)
+		http.Error(w, ErrInvalidPagination.Error(), http.StatusBadRequest)
+		return
+	}
+
+	items, err := h.service.List(r.Context(), limit, offset)
+	if err != nil {
+		writeServiceError(w, err)
 		return
 	}
 	total, err := h.service.Count(r.Context())
 	if err != nil {
-		matchServiceError(w, err)
+		writeServiceError(w, err)
 		return
 	}
-	if chats == nil {
-		chats = []Chat{}
+	if items == nil {
+		items = []Chat{}
 	}
-	writeChatJSON(w, http.StatusOK, ListChatsResponse{
-		Chats: chats, Total: total, Limit: limit, Offset: offset,
+
+	writeJSON(w, http.StatusOK, listChatsResponse{
+		Chats:  items,
+		Total:  total,
+		Limit:  limit,
+		Offset: offset,
 	})
 }
 
 func (h *Handler) GetByID(w http.ResponseWriter, r *http.Request) {
 	chat, err := h.service.GetByID(r.Context(), r.PathValue("id"))
 	if err != nil {
-		matchServiceError(w, err)
+		writeServiceError(w, err)
 		return
 	}
-	writeChatJSON(w, http.StatusOK, chat)
+
+	writeJSON(w, http.StatusOK, chat)
 }
 
 func (h *Handler) UpdateTitle(w http.ResponseWriter, r *http.Request) {
-	var req *UpdateChatTitleRequest
-	if !decodeChatJSON(w, r, &req) {
+	var req updateTitleRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
-	if req == nil || req.Title == nil {
-		matchServiceError(w, ErrInvalidTitle)
+	if req.Title == nil {
+		writeServiceError(w, ErrInvalidTitle)
 		return
 	}
+
 	chat, err := h.service.UpdateTitle(r.Context(), r.PathValue("id"), *req.Title)
 	if err != nil {
-		matchServiceError(w, err)
+		writeServiceError(w, err)
 		return
 	}
-	writeChatJSON(w, http.StatusOK, chat)
+
+	writeJSON(w, http.StatusOK, chat)
 }
 
 func (h *Handler) Close(w http.ResponseWriter, r *http.Request) {
 	chat, err := h.service.Close(r.Context(), r.PathValue("id"))
 	if err != nil {
-		matchServiceError(w, err)
+		writeServiceError(w, err)
 		return
 	}
-	writeChatJSON(w, http.StatusOK, chat)
+
+	writeJSON(w, http.StatusOK, chat)
 }
 
-func decodeChatJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
-	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodyBytes)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
-	err := decoder.Decode(dst)
-	if err == nil {
-		var extra any
-		err = decoder.Decode(&extra)
-		if errors.Is(err, io.EOF) {
-			return true
-		}
+
+	if err := decoder.Decode(dst); err != nil {
+		return err
 	}
-	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-		http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
-	} else {
-		http.Error(w, "Invalid JSON body", http.StatusBadRequest)
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("request body must contain one JSON value")
 	}
-	return false
+	return nil
 }
 
-func writeChatJSON(w http.ResponseWriter, status int, data any) {
+func parseQueryInt(r *http.Request, name string, defaultValue int) (int, error) {
+	value := r.URL.Query().Get(name)
+	if value == "" {
+		return defaultValue, nil
+	}
+	return strconv.Atoi(value)
+}
+
+func writeServiceError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrChatNotFound):
+		http.Error(w, err.Error(), http.StatusNotFound)
+	case errors.Is(err, ErrInvalidChatID),
+		errors.Is(err, ErrInvalidPagination),
+		errors.Is(err, ErrInvalidTitle):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	default:
+		slog.Error("chat request failed", "error", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+	}
+}
+
+func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		log.Printf("failed to encode chat response: %v", err)
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		slog.Error("encode JSON response", "error", err)
 	}
 }

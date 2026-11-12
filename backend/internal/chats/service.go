@@ -20,10 +20,9 @@ type ChatRepository interface {
 type ChatService interface {
 	Create(ctx context.Context, title *string) (*Chat, error)
 	GetByID(ctx context.Context, id string) (*Chat, error)
-	List(ctx context.Context, limit int, offset int) ([]Chat, error)
+	List(ctx context.Context, limit, offset int) ([]Chat, error)
 	Count(ctx context.Context) (int64, error)
-	UpdateTitle(ctx context.Context, id string, title string) (*Chat, error)
-	Touch(ctx context.Context, id string) error
+	UpdateTitle(ctx context.Context, id, title string) (*Chat, error)
 	Close(ctx context.Context, id string) (*Chat, error)
 }
 type Service struct {
@@ -46,8 +45,7 @@ func (s *Service) Create(ctx context.Context, title *string) (*Chat, error) {
 }
 
 func (s *Service) GetByID(ctx context.Context, id string) (*Chat, error) {
-	_, err := uuid.Parse(id)
-	if err != nil {
+	if _, err := uuid.Parse(id); err != nil {
 		return nil, ErrInvalidChatID
 	}
 	return s.repo.GetByID(ctx, id)
@@ -69,10 +67,10 @@ func (s *Service) UpdateTitle(ctx context.Context, id, title string) (*Chat, err
 		return nil, ErrInvalidChatID
 	}
 	trimmed := strings.TrimSpace(title)
-	if trimmed == "" || utf8.RuneCountInString(title) > 255 {
+	if trimmed == "" || utf8.RuneCountInString(trimmed) > 255 {
 		return nil, ErrInvalidTitle
 	}
-	return s.repo.UpdateTitle(ctx, id, title)
+	return s.repo.UpdateTitle(ctx, id, trimmed)
 }
 
 func (s *Service) Close(ctx context.Context, id string) (*Chat, error) {
