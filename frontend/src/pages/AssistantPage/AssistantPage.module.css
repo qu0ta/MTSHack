@@ -1,0 +1,17 @@
+.page {
+  min-height: calc(100vh - 76px);
+  padding: 28px 18px 48px;
+}
+
+.heading { max-width: 760px; margin-bottom: 28px; }
+.heading > span { color: var(--red); font: 500 10px var(--mono); letter-spacing: 0.06em; }
+.heading h1 { margin: 16px 0 12px; font: 600 clamp(2.25rem, 7vw, 4.75rem)/1 var(--display); letter-spacing: -0.06em; }
+.heading p { max-width: 620px; margin: 0; color: var(--muted); font-size: 16px; line-height: 1.5; }
+
+@media (min-width: 720px) {
+  .page { padding: 52px 32px 100px; }
+}
+
+@media (min-width: 1120px) {
+  .page { padding-inline: 48px; }
+}
