@@ -29,6 +29,8 @@ type MessageRepository interface {
 		ctx context.Context,
 		chatID string,
 	) (int64, error)
+
+	ListRecentByChatID(ctx context.Context, chatID string, limit int) ([]Message, error)
 }
 
 type MessageService struct {
@@ -73,4 +75,13 @@ func (m *MessageService) CountByChatID(ctx context.Context, chatID string) (int6
 		return 0, ErrInvalidChatID
 	}
 	return m.repo.CountByChatID(ctx, chatID)
+}
+func (m *MessageService) ListRecentByChatID(ctx context.Context, chatID string, limit int) ([]Message, error) {
+	if _, err := uuid.Parse(chatID); err != nil {
+		return nil, ErrInvalidChatID
+	}
+	if limit < 1 || limit > 100 {
+		return nil, ErrInvalidPagination
+	}
+	return m.repo.ListRecentByChatID(ctx, chatID, limit)
 }
