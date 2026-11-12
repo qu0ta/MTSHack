@@ -3,6 +3,7 @@ package messages
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -10,6 +11,33 @@ import (
 
 type PostgresRepository struct {
 	pool *pgxpool.Pool
+}
+
+func (p *PostgresRepository) ListRecentByChatID(ctx context.Context, chatID string, limit int) ([]Message, error) {
+	const query = `SELECT
+    id,
+    chat_id,
+    role,
+    content,
+    created_at,
+    response_time_ms,
+    metadata
+FROM messages
+WHERE chat_id = $1
+ORDER BY created_at DESC, id DESC
+LIMIT $2;`
+	rows, err := p.pool.Query(ctx, query, chatID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recent messages: %w", err)
+	}
+	messages, err := pgx.CollectRows(rows, pgx.RowToStructByName[Message])
+	if err != nil {
+		return nil, fmt.Errorf("collect messages: %w", err)
+	}
+
+	slices.Reverse(messages)
+	return messages, nil
+
 }
 
 func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {

@@ -10,9 +10,10 @@ import (
 const validChatID = "550e8400-e29b-41d4-a716-446655440000"
 
 type repositoryStub struct {
-	createFn        func(context.Context, string, string, string, *int, Metadata) (*Message, error)
-	listByChatIDFn  func(context.Context, string, int, int) ([]Message, error)
-	countByChatIDFn func(context.Context, string) (int64, error)
+	createFn             func(context.Context, string, string, string, *int, Metadata) (*Message, error)
+	listByChatIDFn       func(context.Context, string, int, int) ([]Message, error)
+	countByChatIDFn      func(context.Context, string) (int64, error)
+	listRecentByChatIDFn func(context.Context, string, int) ([]Message, error)
 }
 
 func (r repositoryStub) Create(
@@ -37,6 +38,14 @@ func (r repositoryStub) ListByChatID(
 
 func (r repositoryStub) CountByChatID(ctx context.Context, chatID string) (int64, error) {
 	return r.countByChatIDFn(ctx, chatID)
+}
+
+func (r repositoryStub) ListRecentByChatID(
+	ctx context.Context,
+	chatID string,
+	limit int,
+) ([]Message, error) {
+	return r.listRecentByChatIDFn(ctx, chatID, limit)
 }
 
 func TestMessageServiceCreate(t *testing.T) {
@@ -279,5 +288,72 @@ func TestMessageServiceCountByChatIDRejectsInvalidID(t *testing.T) {
 	}
 	if called {
 		t.Fatal("repository was called for invalid chat id")
+	}
+}
+
+func TestMessageServiceListRecentByChatID(t *testing.T) {
+	want := []Message{{ID: "message-id", ChatID: validChatID, Role: RoleUser}}
+	service := NewMessageService(repositoryStub{
+		listRecentByChatIDFn: func(_ context.Context, chatID string, limit int) ([]Message, error) {
+			if chatID != validChatID || limit != 50 {
+				t.Fatalf("arguments = %q, %d", chatID, limit)
+			}
+			return want, nil
+		},
+	})
+
+	got, err := service.ListRecentByChatID(context.Background(), validChatID, 50)
+	if err != nil {
+		t.Fatalf("ListRecentByChatID() error = %v", err)
+	}
+	if len(got) != 1 || got[0].ID != want[0].ID {
+		t.Fatalf("ListRecentByChatID() = %#v", got)
+	}
+}
+
+func TestMessageServiceListRecentByChatIDValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		chatID  string
+		limit   int
+		wantErr error
+	}{
+		{name: "invalid chat id", chatID: "bad", limit: 50, wantErr: ErrInvalidChatID},
+		{name: "zero limit", chatID: validChatID, limit: 0, wantErr: ErrInvalidPagination},
+		{name: "limit too large", chatID: validChatID, limit: 101, wantErr: ErrInvalidPagination},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			called := false
+			service := NewMessageService(repositoryStub{
+				listRecentByChatIDFn: func(context.Context, string, int) ([]Message, error) {
+					called = true
+					return nil, nil
+				},
+			})
+
+			_, err := service.ListRecentByChatID(context.Background(), tc.chatID, tc.limit)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("ListRecentByChatID() error = %v, want %v", err, tc.wantErr)
+			}
+			if called {
+				t.Fatal("repository was called for invalid input")
+			}
+		})
+	}
+}
+
+func TestMessageServiceListRecentByChatIDPropagatesRepositoryError(t *testing.T) {
+	wantErr := errors.New("database unavailable")
+	service := NewMessageService(repositoryStub{
+		listRecentByChatIDFn: func(context.Context, string, int) ([]Message, error) {
+			return nil, wantErr
+		},
+	})
+
+	_, err := service.ListRecentByChatID(context.Background(), validChatID, 50)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("ListRecentByChatID() error = %v, want %v", err, wantErr)
 	}
 }
