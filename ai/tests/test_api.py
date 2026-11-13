@@ -93,3 +93,11 @@ def test_chat_has_no_lead():
 
     assert "lead" in data
     assert data["lead"] is None
+def test_confirmed_lead():
+    payload = {"session_id": "test", "message": "Подтверждаю", "history": None, "lead_requested": True}
+    incomplete = client.post("/api/v1/chat", json=payload).json()
+    assert incomplete["lead"] is None and "телефон" in incomplete["answer"]
+    payload["client_data"] = {"contact_name": "Анна", "company_name": "Пример", "phone": "+70000000000"}
+    response = client.post("/api/v1/chat", json=payload)
+    assert response.status_code == 200
+    assert response.json()["lead"] == {**payload["client_data"], "summary": "Подтверждаю"}
