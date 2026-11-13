@@ -3,27 +3,67 @@ package messages
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type PostgresRepository struct {
-	pool *pgxpool.Pool
+type queryer interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Query(context.Context, string, ...any) (pgx.Rows, error)
 }
 
-func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
+type PostgresRepository struct {
+	pool queryer
+}
+
+func (p *PostgresRepository) ListRecentByChatID(ctx context.Context, chatID string, limit int) ([]Message, error) {
+	const query = `SELECT
+    id,
+    chat_id,
+    role,
+    content,
+    created_at,
+    response_time_ms,
+    metadata
+FROM messages
+WHERE chat_id = $1
+ORDER BY created_at DESC, id DESC
+LIMIT $2;`
+	rows, err := p.pool.Query(ctx, query, chatID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recent messages: %w", err)
+	}
+	messages, err := pgx.CollectRows(rows, pgx.RowToStructByName[Message])
+	if err != nil {
+		return nil, fmt.Errorf("collect messages: %w", err)
+	}
+
+	slices.Reverse(messages)
+	return messages, nil
+
+}
+
+func NewPostgresRepository(pool queryer) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
 }
-func (p *PostgresRepository) Create(ctx context.Context, chatID string, role string, content string, responseTimeMS *int, metadata Metadata) (*Message, error) {
+
+func (p *PostgresRepository) Create(
+	ctx context.Context,
+	chatID string,
+	role string,
+	content string,
+	responseTimeMS *int,
+	metadata Metadata,
+) (*Message, error) {
 	const query = `INSERT INTO messages (
     chat_id,
     role,
     content,
     response_time_ms,
-    metadata
+    metadata, created_at
 )
-VALUES ($1, $2, $3, $4, $5)
+VALUES ($1, $2, $3, $4, $5, clock_timestamp())
 RETURNING
     id,
     chat_id,
