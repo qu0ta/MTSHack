@@ -1,5 +1,0 @@
-numpy
-openai
-langchain-text-splitters
-rank-bm25
-faiss-cpu
