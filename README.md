@@ -1,68 +1,96 @@
-# MTSHack — общий проект
+# MTSHack
 
-Стартовый каркас командного проекта AI-консультанта MTS Energytool.
+AI-консультант MTS EnergyTool. В текущей ветке находятся Go API, PostgreSQL и локальный контрактный mock ML-сервиса.
 
-## Структура
+## Запуск в Docker
 
-```text
-.
-├── backend/          # Go HTTP API — зона ответственности Go-разработчика
-├── frontend/         # интерфейс чата — зона ответственности frontend-разработчика
-├── ml/               # RAG и работа с LLM — зона ответственности ML-разработчиков
-├── migrations/       # SQL-миграции PostgreSQL
-├── compose.yaml
-├── .env.example
-├── .gitignore
-└── Dockerfile
+```bash
+docker compose up --build --wait
 ```
 
-## Запуск
+Compose запускает:
 
-1. Скопировать `.env.example` в `.env` и при необходимости изменить настройки.
-2. Запустить:
+- `backend` — Go API на `http://localhost:8080`;
+- `postgres` — PostgreSQL на `localhost:5433`;
+- `migrate` — однократное применение SQL-миграций;
+- `ml-service` — WireMock на `http://localhost:8000`, совместимый с текущим Go-клиентом.
 
-   ```bash
-   docker compose up --build
-   ```
+Проверки после запуска:
 
-3. Проверить API: `GET http://localhost:8080/health`.
+```bash
+curl http://localhost:8080/health
+curl http://localhost:8080/ready
+curl http://localhost:8000/health
+```
 
-На первом этапе API содержит health-check и базовую структуру. Бизнес-эндпоинты,
-подключение PostgreSQL и интеграция с ML-сервисом добавляются отдельными задачами.
+Посмотреть состояние и логи:
 
-## Предлагаемый контракт между Go API и ML
+```bash
+docker compose ps
+docker compose logs -f backend ml-service
+```
 
-Go backend отвечает за пользователей/сессии, историю сообщений, заявки и API для UI.
-ML-сервис отвечает за формирование ответа консультанта на основе базы знаний.
+Остановить стек:
 
-Предлагаемый внутренний запрос Go → ML:
+```bash
+docker compose down
+```
+
+Удалить также локальные данные PostgreSQL:
+
+```bash
+docker compose down -v
+```
+
+## Настройки
+
+Compose автоматически читает `.env` в корне. Для локальных значений скопируйте `.env.example` в `.env` и измените нужные параметры:
+
+```dotenv
+BACKEND_PORT=8080
+ML_PORT=8000
+POSTGRES_PORT=5433
+POSTGRES_DB=mtshack
+POSTGRES_USER=mtshack
+POSTGRES_PASSWORD=mtshack
+```
+
+Файл `.env` не должен попадать в Git.
+
+## Контракт Go → ML
+
+Backend отправляет `POST /api/v1/chat` на `http://ml-service:8000`:
 
 ```json
 {
-  "chat_id": "uuid",
+  "session_id": "chat-uuid",
   "message": "Текст сообщения",
   "history": [
     {"role": "user", "content": "Предыдущее сообщение"},
     {"role": "assistant", "content": "Предыдущий ответ"}
-  ]
+  ],
+  "client_data": {}
 }
 ```
 
-Предлагаемый ответ ML → Go:
+Ожидаемый ответ:
 
 ```json
 {
   "answer": "Ответ консультанта",
-  "sources": ["document-1", "document-2"],
-  "needs_manager": false,
-  "summary": null
+  "client_data": {},
+  "sources": [],
+  "lead": null,
+  "response_time_ms": 1
 }
 ```
 
-Это стартовый вариант контракта: согласуйте поля с ML-командой до реализации интеграции.
+Mock нужен только для полностью воспроизводимого локального запуска backend-ветки. После добавления FastAPI-сервиса его контейнер должен сохранить имя `ml-service`, внутренний порт `8000`, health endpoint `/health` и контракт `/api/v1/chat`. Go-код и `ML_SERVICE_URL` при этом менять не потребуется.
 
-## Важно
+## Локальная проверка Go
 
-- Не коммитить `.env`, API-ключи, персональные данные и исходную базу знаний.
-- Не добавлять в ответы факты об энергетике, которых нет в базе знаний.
-- Если база знаний не содержит ответа, консультант должен сообщить об этом и предложить связаться со специалистом.
+```bash
+cd backend
+go test ./...
+go vet ./...
+```

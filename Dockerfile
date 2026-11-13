@@ -16,11 +16,14 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 
 FROM alpine:3.21
 
-RUN adduser -D -H appuser
+RUN apk add --no-cache ca-certificates \
+    && adduser -D -H -u 10001 appuser
 
 WORKDIR /app
 
-COPY --from=build /out/server ./server
+COPY --from=build --chown=appuser:appuser /out/server ./server
+
+ENV HTTP_ADDR=:8080
 
 USER appuser
 
