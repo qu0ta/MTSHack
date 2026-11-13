@@ -21,7 +21,7 @@ import (
 )
 
 func main() {
-	_ = godotenv.Load()
+	_ = godotenv.Load("../.env.example")
 
 	db, err := platform.ConnectDB()
 	if err != nil {
