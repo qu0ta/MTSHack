@@ -6,11 +6,15 @@ import (
 	"slices"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type queryer interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
 type PostgresRepository struct {
-	pool *pgxpool.Pool
+	pool queryer
 }
 
 func (p *PostgresRepository) ListRecentByChatID(ctx context.Context, chatID string, limit int) ([]Message, error) {
@@ -40,7 +44,7 @@ LIMIT $2;`
 
 }
 
-func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
+func NewPostgresRepository(pool queryer) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
 }
 func (p *PostgresRepository) Create(ctx context.Context, chatID string, role string, content string, responseTimeMS *int, metadata Metadata) (*Message, error) {
@@ -49,9 +53,9 @@ func (p *PostgresRepository) Create(ctx context.Context, chatID string, role str
     role,
     content,
     response_time_ms,
-    metadata
+    metadata, created_at
 )
-VALUES ($1, $2, $3, $4, $5)
+VALUES ($1, $2, $3, $4, $5, clock_timestamp())
 RETURNING
     id,
     chat_id,

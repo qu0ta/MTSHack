@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -64,9 +65,23 @@ func (c *HTTPClient) Answer(ctx context.Context, request AnswerRequest) (*Answer
 	}
 	if httpResponse.StatusCode < http.StatusOK ||
 		httpResponse.StatusCode >= http.StatusMultipleChoices {
+		kind := ErrUnavailable
+		switch httpResponse.StatusCode {
+		case 422:
+			kind = ErrRejected
+		case 502:
+			kind = ErrInvalidResponse
+		case 504:
+			kind = ErrTimeout
+		case 503:
+			var detail struct{ Detail struct{ Code string } }
+			if json.Unmarshal(body, &detail) == nil && detail.Detail.Code == "ml_busy" {
+				kind = ErrBusy
+			}
+		}
 		return nil, fmt.Errorf(
 			"%w: ML service returned status %d",
-			ErrUnavailable,
+			kind,
 			httpResponse.StatusCode,
 		)
 	}
@@ -75,6 +90,9 @@ func (c *HTTPClient) Answer(ctx context.Context, request AnswerRequest) (*Answer
 		return nil, fmt.Errorf("%w: decode JSON: %v", ErrInvalidResponse, err)
 	}
 	response.Answer = strings.TrimSpace(response.Answer)
+	if utf8.RuneCountInString(response.Answer) > 10000 {
+		return nil, fmt.Errorf("%w: answer exceeds history limit", ErrInvalidResponse)
+	}
 	if response.Answer == "" {
 		return nil, fmt.Errorf("%w: empty answer", ErrInvalidResponse)
 	}
