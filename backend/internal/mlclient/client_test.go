@@ -86,11 +86,31 @@ func TestHTTPClientAnswerResponseErrors(t *testing.T) {
 		body    string
 		wantErr error
 	}{
-		{name: "non-success status", status: http.StatusInternalServerError, body: `{}`, wantErr: ErrUnavailable},
+		{
+			name:    "non-success status",
+			status:  http.StatusInternalServerError,
+			body:    `{}`,
+			wantErr: ErrUnavailable,
+		},
 		{name: "invalid JSON", status: http.StatusOK, body: `{`, wantErr: ErrInvalidResponse},
-		{name: "empty answer", status: http.StatusOK, body: `{"answer":"   "}`, wantErr: ErrInvalidResponse},
-		{name: "negative response time", status: http.StatusOK, body: `{"answer":"Ответ","response_time_ms":-1}`, wantErr: ErrInvalidResponse},
-		{name: "oversized response", status: http.StatusOK, body: strings.Repeat("x", maxResponseBodyBytes+1), wantErr: ErrInvalidResponse},
+		{
+			name:    "negative response time",
+			status:  http.StatusOK,
+			body:    `{"answer":"Ответ","client_data":{},"sources":[],"lead":null,"response_time_ms":-1}`,
+			wantErr: ErrInvalidResponse,
+		},
+		{
+			name:    "negative response time",
+			status:  http.StatusOK,
+			body:    `{"answer":"Ответ","response_time_ms":-1}`,
+			wantErr: ErrInvalidResponse,
+		},
+		{
+			name:    "oversized response",
+			status:  http.StatusOK,
+			body:    strings.Repeat("x", maxResponseBodyBytes+1),
+			wantErr: ErrInvalidResponse,
+		},
 	}
 
 	for _, tc := range tests {
@@ -144,5 +164,53 @@ func TestHTTPClientAnswerContextCanceled(t *testing.T) {
 	_, err = client.Answer(ctx, AnswerRequest{})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("Answer() error = %v, want %v", err, context.Canceled)
+	}
+}
+
+func TestHTTPClientAnswerRequiresLeadField(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{
+			name: "explicit null lead is valid",
+			body: `{"answer":"Ответ","client_data":{},"sources":[],"lead":null,"response_time_ms":0}`,
+		},
+		{
+			name:    "missing lead is invalid",
+			body:    `{"answer":"Ответ","client_data":{},"sources":[],"response_time_ms":0}`,
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			t.Cleanup(server.Close)
+
+			client, err := New(server.URL, time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			response, err := client.Answer(context.Background(), AnswerRequest{})
+			if tc.wantErr {
+				if !errors.Is(err, ErrInvalidResponse) {
+					t.Fatalf("Answer() error = %v, want ErrInvalidResponse", err)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("Answer() error = %v", err)
+			}
+			if response == nil || response.Lead != nil {
+				t.Fatalf("expected an answer without a lead, got %#v", response)
+			}
+		})
 	}
 }

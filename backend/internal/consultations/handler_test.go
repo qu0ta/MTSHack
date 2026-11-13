@@ -16,11 +16,11 @@ import (
 const validHandlerChatID = "550e8400-e29b-41d4-a716-446655440000"
 
 type consultationSenderStub struct {
-	sendFn func(context.Context, string, string) (*SendResult, error)
+	sendFn func(context.Context, string, SendRequest) (*SendResult, error)
 }
 
-func (s consultationSenderStub) Send(ctx context.Context, chatID, content string) (*SendResult, error) {
-	return s.sendFn(ctx, chatID, content)
+func (s consultationSenderStub) Send(ctx context.Context, chatID string, request SendRequest) (*SendResult, error) {
+	return s.sendFn(ctx, chatID, request)
 }
 
 func serveConsultations(sender ConsultationSender, body string) *httptest.ResponseRecorder {
@@ -37,9 +37,9 @@ func serveConsultations(sender ConsultationSender, body string) *httptest.Respon
 }
 
 func TestHandlerSend(t *testing.T) {
-	sender := consultationSenderStub{sendFn: func(_ context.Context, chatID, content string) (*SendResult, error) {
-		if chatID != validHandlerChatID || content != "Вопрос" {
-			t.Fatalf("arguments = %q, %q", chatID, content)
+	sender := consultationSenderStub{sendFn: func(_ context.Context, chatID string, request SendRequest) (*SendResult, error) {
+		if chatID != validHandlerChatID || request.Content != "Вопрос" {
+			t.Fatalf("arguments = %q, %#v", chatID, request)
 		}
 		return &SendResult{}, nil
 	}}
@@ -55,7 +55,7 @@ func TestHandlerSend(t *testing.T) {
 }
 
 func TestHandlerSendRejectsInvalidBody(t *testing.T) {
-	sender := consultationSenderStub{sendFn: func(context.Context, string, string) (*SendResult, error) {
+	sender := consultationSenderStub{sendFn: func(context.Context, string, SendRequest) (*SendResult, error) {
 		t.Fatal("service must not be called")
 		return nil, nil
 	}}
@@ -65,9 +65,21 @@ func TestHandlerSendRejectsInvalidBody(t *testing.T) {
 		want int
 	}{
 		{name: "empty", body: "", want: http.StatusBadRequest},
-		{name: "unknown field", body: `{"content":"ok","role":"assistant"}`, want: http.StatusBadRequest},
-		{name: "multiple values", body: `{"content":"one"} {"content":"two"}`, want: http.StatusBadRequest},
-		{name: "too large", body: `{"content":"` + strings.Repeat("x", maxRequestBodyBytes) + `"}`, want: http.StatusRequestEntityTooLarge},
+		{
+			name: "unknown field",
+			body: `{"content":"ok","role":"assistant"}`,
+			want: http.StatusBadRequest,
+		},
+		{
+			name: "multiple values",
+			body: `{"content":"one"} {"content":"two"}`,
+			want: http.StatusBadRequest,
+		},
+		{
+			name: "too large",
+			body: `{"content":"` + strings.Repeat("x", maxRequestBodyBytes) + `"}`,
+			want: http.StatusRequestEntityTooLarge,
+		},
 	}
 
 	for _, tc := range tests {
@@ -93,12 +105,15 @@ func TestHandlerSendMapsErrors(t *testing.T) {
 		{name: "timeout", err: mlclient.ErrTimeout, want: http.StatusGatewayTimeout},
 		{name: "unavailable", err: mlclient.ErrUnavailable, want: http.StatusServiceUnavailable},
 		{name: "invalid response", err: mlclient.ErrInvalidResponse, want: http.StatusBadGateway},
-		{name: "internal", err: errors.New("database unavailable"), want: http.StatusInternalServerError},
+		{
+			name: "internal", err: errors.New("database unavailable"),
+			want: http.StatusInternalServerError,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			sender := consultationSenderStub{sendFn: func(context.Context, string, string) (*SendResult, error) {
+			sender := consultationSenderStub{sendFn: func(context.Context, string, SendRequest) (*SendResult, error) {
 				return nil, tc.err
 			}}
 			recorder := serveConsultations(sender, `{"content":"Вопрос"}`)

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -21,6 +22,7 @@ const (
 type Client interface {
 	Answer(ctx context.Context, request AnswerRequest) (*AnswerResponse, error)
 }
+
 type HTTPClient struct {
 	baseURL    string
 	httpClient *http.Client
@@ -64,17 +66,76 @@ func (c *HTTPClient) Answer(ctx context.Context, request AnswerRequest) (*Answer
 	}
 	if httpResponse.StatusCode < http.StatusOK ||
 		httpResponse.StatusCode >= http.StatusMultipleChoices {
+		kind := ErrUnavailable
+		switch httpResponse.StatusCode {
+		case 422:
+			kind = ErrRejected
+		case 502:
+			kind = ErrInvalidResponse
+		case 504:
+			kind = ErrTimeout
+		case 503:
+			var detail struct{ Detail struct{ Code string } }
+			if json.Unmarshal(body, &detail) == nil && detail.Detail.Code == "ml_busy" {
+				kind = ErrBusy
+			}
+		}
 		return nil, fmt.Errorf(
 			"%w: ML service returned status %d",
-			ErrUnavailable,
+			kind,
 			httpResponse.StatusCode,
 		)
 	}
-	var response AnswerResponse
-	if err := json.Unmarshal(body, &response); err != nil {
+
+	var payloadResponse struct {
+		Answer         *string         `json:"answer"`
+		ClientData     *ClientData     `json:"client_data"`
+		Sources        []*string       `json:"sources"`
+		Lead           json.RawMessage `json:"lead"`
+		ResponseTimeMS *int            `json:"response_time_ms"`
+	}
+
+	if err := json.Unmarshal(body, &payloadResponse); err != nil {
 		return nil, fmt.Errorf("%w: decode JSON: %v", ErrInvalidResponse, err)
 	}
+
+	switch {
+	case payloadResponse.Answer == nil:
+		return nil, fmt.Errorf("%w: missing or null answer", ErrInvalidResponse)
+	case payloadResponse.ClientData == nil:
+		return nil, fmt.Errorf("%w: missing or null client_data", ErrInvalidResponse)
+	case payloadResponse.Sources == nil:
+		return nil, fmt.Errorf("%w: missing or null sources", ErrInvalidResponse)
+	case len(payloadResponse.Lead) == 0:
+		return nil, fmt.Errorf("%w: missing lead", ErrInvalidResponse)
+	case payloadResponse.ResponseTimeMS == nil:
+		return nil, fmt.Errorf("%w: missing or null response_time_ms", ErrInvalidResponse)
+	}
+
+	var lead *Lead
+	if err := json.Unmarshal(payloadResponse.Lead, &lead); err != nil {
+		return nil, fmt.Errorf("%w: decode lead: %v", ErrInvalidResponse, err)
+	}
+
+	response := AnswerResponse{
+		Answer:         *payloadResponse.Answer,
+		ClientData:     *payloadResponse.ClientData,
+		Sources:        make([]string, 0, len(payloadResponse.Sources)),
+		Lead:           lead,
+		ResponseTimeMS: *payloadResponse.ResponseTimeMS,
+	}
+
+	for i, source := range payloadResponse.Sources {
+		if source == nil {
+			return nil, fmt.Errorf("%w: sources[%d] is null", ErrInvalidResponse, i)
+		}
+		response.Sources = append(response.Sources, *source)
+	}
+
 	response.Answer = strings.TrimSpace(response.Answer)
+	if utf8.RuneCountInString(response.Answer) > 10000 {
+		return nil, fmt.Errorf("%w: answer exceeds history limit", ErrInvalidResponse)
+	}
 	if response.Answer == "" {
 		return nil, fmt.Errorf("%w: empty answer", ErrInvalidResponse)
 	}

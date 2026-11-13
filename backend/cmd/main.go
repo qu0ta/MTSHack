@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/qu0ta/MTSHack/internal/applications"
 	"github.com/qu0ta/MTSHack/internal/chats"
 	"github.com/qu0ta/MTSHack/internal/consultations"
 	"github.com/qu0ta/MTSHack/internal/messages"
@@ -36,12 +37,12 @@ func main() {
 	messageService := messages.NewMessageService(messageRepository)
 	messageHandler := messages.NewHandler(messageService, chatService)
 
-	mlClient, err := mlclient.New(os.Getenv("ML_SERVICE_URL"), time.Second*45)
+	mlClient, err := mlclient.New(os.Getenv("ML_SERVICE_URL"), time.Second*65)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	consultService := consultations.NewConsultationService(chatService, messageService, mlClient)
+	consultService := consultations.NewPostgresService(db, mlClient)
 	consultHandler := consultations.NewHandler(consultService)
 
 	mux := http.NewServeMux()
@@ -50,6 +51,8 @@ func main() {
 	chatHandler.RegisterRoutes(mux)
 	messageHandler.RegisterRoutes(mux)
 	consultHandler.RegisterRoutes(mux)
+	applicationService := applications.NewService(applications.NewPostgresRepository(db))
+	mux.HandleFunc("GET /api/v1/chats/{id}/application", applicationService.GetHandler)
 
 	addr := os.Getenv("HTTP_ADDR")
 	if addr == "" {
@@ -60,7 +63,7 @@ func main() {
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      60 * time.Second,
+		WriteTimeout:      95 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 

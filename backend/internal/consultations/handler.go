@@ -13,20 +13,24 @@ import (
 	"github.com/qu0ta/MTSHack/internal/mlclient"
 )
 
-const maxRequestBodyBytes = 16 << 10
+const maxRequestBodyBytes = 128 << 10
 
 type ConsultationSender interface {
 	Send(
 		ctx context.Context,
 		chatID string,
-		content string,
+		request SendRequest,
 	) (*SendResult, error)
 }
+
 type Handler struct {
 	service ConsultationSender
 }
-type sendRequest struct {
-	Content string `json:"content"`
+
+type SendRequest struct {
+	LeadRequested bool                `json:"lead_requested"`
+	ClientData    mlclient.ClientData `json:"client_data"`
+	Content       string              `json:"content"`
 }
 
 func NewHandler(service ConsultationSender) *Handler {
@@ -38,7 +42,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 func (h *Handler) Send(w http.ResponseWriter, r *http.Request) {
-	var request sendRequest
+	var request SendRequest
 	if err := decodeJSON(w, r, &request); err != nil {
 		var maxBytesError *http.MaxBytesError
 		if errors.As(err, &maxBytesError) {
@@ -49,7 +53,7 @@ func (h *Handler) Send(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.service.Send(r.Context(), r.PathValue("id"), request.Content)
+	result, err := h.service.Send(r.Context(), r.PathValue("id"), request)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -82,7 +86,12 @@ func writeError(w http.ResponseWriter, err error) {
 		http.Error(w, err.Error(), http.StatusNotFound)
 	case errors.Is(err, chats.ErrInvalidChatID), errors.Is(err, messages.ErrInvalidContent):
 		http.Error(w, err.Error(), http.StatusBadRequest)
-	case errors.Is(err, ErrChatClosed):
+	case errors.Is(err, mlclient.ErrRejected):
+		http.Error(w, "invalid consultation data", 422)
+	case errors.Is(err, mlclient.ErrBusy):
+		w.Header().Set("Retry-After", "2")
+		http.Error(w, "ML busy", 503)
+	case errors.Is(err, ErrTurnInProgress), errors.Is(err, ErrChatClosed):
 		http.Error(w, err.Error(), http.StatusConflict)
 	case errors.Is(err, mlclient.ErrTimeout):
 		http.Error(w, err.Error(), http.StatusGatewayTimeout)
