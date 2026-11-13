@@ -22,7 +22,7 @@ func (s chatServiceStub) GetByID(ctx context.Context, id string) (*chats.Chat, e
 	return s.getByIDFn(ctx, id)
 }
 
-func (s chatServiceStub) Touch(ctx context.Context, id string) error {
+func (s chatServiceStub) SaveClientData(ctx context.Context, id string, _ mlclient.ClientData) error {
 	if s.touchFn == nil {
 		return nil
 	}
@@ -72,7 +72,7 @@ func TestConsultationServiceSend(t *testing.T) {
 	createCalls := 0
 	touched := false
 
-	service := NewConsultationService(
+	service := newTurn(
 		chatServiceStub{
 			getByIDFn: func(_ context.Context, id string) (*chats.Chat, error) {
 				if id != validChatID {
@@ -133,29 +133,29 @@ func TestConsultationServiceSend(t *testing.T) {
 				t.Fatalf("Answer() history = %#v", request.History)
 			}
 			return &mlclient.AnswerResponse{
-				Answer:         "Ответ ML",
-				Sources:        []string{"22-askue.md"},
-				Lead:           &mlclient.Lead{ContactName: "Анна"},
+				Answer:  "Ответ ML",
+				Sources: []string{"22-askue.md"},
+
 				ResponseTimeMS: 1250,
 			}, nil
 		}},
 	)
 
-	result, err := service.Send(context.Background(), validChatID, "  Новый вопрос  ")
+	result, err := service.Send(context.Background(), validChatID, SendRequest{Content: "  Новый вопрос  "})
 	if err != nil {
 		t.Fatalf("Send() error = %v", err)
 	}
 	if result.UserMessage.Role != messages.RoleUser || result.AssistantMessage.Role != messages.RoleAssistant {
 		t.Fatalf("Send() result = %#v", result)
 	}
-	if !result.NeedsManager || createCalls != 2 || !touched {
+	if result.NeedsManager || createCalls != 2 || !touched {
 		t.Fatalf("Send() result = %#v, createCalls = %d, touched = %v", result, createCalls, touched)
 	}
 }
 
 func TestConsultationServiceSendRejectsInvalidContent(t *testing.T) {
 	for _, content := range []string{"   ", strings.Repeat("я", 10001)} {
-		service := NewConsultationService(
+		service := newTurn(
 			chatServiceStub{getByIDFn: func(context.Context, string) (*chats.Chat, error) {
 				t.Fatal("chat service must not be called")
 				return nil, nil
@@ -164,7 +164,7 @@ func TestConsultationServiceSendRejectsInvalidContent(t *testing.T) {
 			mlClientStub{},
 		)
 
-		_, err := service.Send(context.Background(), validChatID, content)
+		_, err := service.Send(context.Background(), validChatID, SendRequest{Content: content})
 		if !errors.Is(err, messages.ErrInvalidContent) {
 			t.Fatalf("Send() error = %v, want %v", err, messages.ErrInvalidContent)
 		}
@@ -172,7 +172,7 @@ func TestConsultationServiceSendRejectsInvalidContent(t *testing.T) {
 }
 
 func TestConsultationServiceSendRejectsClosedChat(t *testing.T) {
-	service := NewConsultationService(
+	service := newTurn(
 		chatServiceStub{getByIDFn: func(context.Context, string) (*chats.Chat, error) {
 			return &chats.Chat{ID: validChatID, Status: "closed"}, nil
 		}},
@@ -180,7 +180,7 @@ func TestConsultationServiceSendRejectsClosedChat(t *testing.T) {
 		mlClientStub{},
 	)
 
-	_, err := service.Send(context.Background(), validChatID, "Вопрос")
+	_, err := service.Send(context.Background(), validChatID, SendRequest{Content: "Вопрос"})
 	if !errors.Is(err, ErrChatClosed) {
 		t.Fatalf("Send() error = %v, want %v", err, ErrChatClosed)
 	}
@@ -228,8 +228,8 @@ func TestConsultationServiceSendPropagatesDependencyErrors(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			service := NewConsultationService(tc.chats, tc.messages, tc.ml)
-			_, err := service.Send(context.Background(), validChatID, "Вопрос")
+			service := newTurn(tc.chats, tc.messages, tc.ml)
+			_, err := service.Send(context.Background(), validChatID, SendRequest{Content: "Вопрос"})
 			if !errors.Is(err, wantErr) {
 				t.Fatalf("Send() error = %v, want wrapped %v", err, wantErr)
 			}
@@ -238,7 +238,7 @@ func TestConsultationServiceSendPropagatesDependencyErrors(t *testing.T) {
 }
 
 func TestConsultationServiceSendRejectsNilMLResponse(t *testing.T) {
-	service := NewConsultationService(
+	service := newTurn(
 		chatServiceStub{getByIDFn: func(context.Context, string) (*chats.Chat, error) {
 			return &chats.Chat{Status: "active"}, nil
 		}},
@@ -250,7 +250,7 @@ func TestConsultationServiceSendRejectsNilMLResponse(t *testing.T) {
 		}},
 	)
 
-	_, err := service.Send(context.Background(), validChatID, "Вопрос")
+	_, err := service.Send(context.Background(), validChatID, SendRequest{Content: "Вопрос"})
 	if !errors.Is(err, mlclient.ErrInvalidResponse) {
 		t.Fatalf("Send() error = %v, want %v", err, mlclient.ErrInvalidResponse)
 	}
@@ -261,7 +261,7 @@ func TestConsultationServiceSendPropagatesCreateErrors(t *testing.T) {
 	for _, failAtCall := range []int{1, 2} {
 		t.Run(string(rune('0'+failAtCall)), func(t *testing.T) {
 			calls := 0
-			service := NewConsultationService(
+			service := newTurn(
 				chatServiceStub{getByIDFn: func(context.Context, string) (*chats.Chat, error) {
 					return &chats.Chat{Status: "active"}, nil
 				}},
@@ -280,7 +280,7 @@ func TestConsultationServiceSendPropagatesCreateErrors(t *testing.T) {
 				}},
 			)
 
-			_, err := service.Send(context.Background(), validChatID, "Вопрос")
+			_, err := service.Send(context.Background(), validChatID, SendRequest{Content: "Вопрос"})
 			if !errors.Is(err, wantErr) {
 				t.Fatalf("Send() error = %v, want wrapped %v", err, wantErr)
 			}

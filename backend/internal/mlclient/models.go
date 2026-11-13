@@ -4,6 +4,8 @@ import "errors"
 
 var (
 	ErrUnavailable     = errors.New("ml service unavailable")
+	ErrRejected        = errors.New("ML rejected request data")
+	ErrBusy            = errors.New("ML busy")
 	ErrTimeout         = errors.New("ml service timeout")
 	ErrInvalidResponse = errors.New("invalid ml response")
 )
@@ -14,10 +16,11 @@ type HistoryItem struct {
 }
 
 type AnswerRequest struct {
-	SessionID  string        `json:"session_id"`
-	Message    string        `json:"message"`
-	History    []HistoryItem `json:"history"`
-	ClientData ClientData    `json:"client_data"`
+	LeadRequested bool          `json:"lead_requested,omitempty"`
+	SessionID     string        `json:"session_id"`
+	Message       string        `json:"message"`
+	History       []HistoryItem `json:"history"`
+	ClientData    ClientData    `json:"client_data"`
 }
 
 type ClientData struct {
@@ -28,6 +31,10 @@ type ClientData struct {
 	Region                *string  `json:"region,omitempty"`
 	ConnectedPowerKW      *float64 `json:"connected_power_kw,omitempty"`
 	MonthlyConsumptionKWH *float64 `json:"monthly_consumption_kwh,omitempty"`
+}
+
+func (d ClientData) Valid() bool {
+	return (d.ConnectedPowerKW == nil || *d.ConnectedPowerKW >= 0) && (d.MonthlyConsumptionKWH == nil || *d.MonthlyConsumptionKWH >= 0)
 }
 
 type Lead struct {
