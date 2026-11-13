@@ -2,43 +2,21 @@ from app.core.dialog_manager import DialogManager
 from app.schemas.chat import ChatRequest
 
 
-def test_search_query_without_history():
-    request = ChatRequest(
-        session_id="test-session-1",
-        message="Нужен учёт по цехам",
-        history=[],
-        client_data={},
-    )
-
-    query = DialogManager().build_search_query(request)
-
-    assert query == "Нужен учёт по цехам"
+def test_history_is_passed_without_repeating_current_question():
+    request = ChatRequest(session_id="one", message="Теперь 900 кВт", history=[
+        {"role": "user", "content": "500 кВт"},
+        {"role": "assistant", "content": "Уточните мощность"},
+    ])
+    assert DialogManager().history_for_ml(request) == [m.model_dump() for m in request.history]
+    assert DialogManager().history_for_ml(ChatRequest(session_id="two", message="Привет")) == []
 
 
-def test_search_query_with_history():
-    request = ChatRequest(
-        session_id="test-session-1",
-        message="А сколько это стоит?",
-        history=[
-            {
-                "role": "user",
-                "content": "Хотим снизить расходы",
-            },
-            {
-                "role": "user",
-                "content": "Нужен учёт по цехам",
-            },
-            {
-                "role": "assistant",
-                "content": "Какие приборы уже установлены?",
-            },
-        ],
-        client_data={},
-    )
-
-    query = DialogManager().build_search_query(request)
-
-    assert query == (
-        "Предыдущая реплика клиента: Нужен учёт по цехам\n"
-        "Текущий вопрос: А сколько это стоит?"
-    )
+def test_business_context_does_not_forward_structured_contacts():
+    request = ChatRequest(session_id="one", message="Что предложите?", client_data={
+        "region": "Москва", "phone": "+79991234567", "contact_name": "Анна", "company_name": "ООО Тест",
+    })
+    text = DialogManager().history_for_ml(request)[0]["content"]
+    assert "Москва" in text
+    assert "+79991234567" not in text
+    assert "Анна" not in text
+    assert "ООО Тест" not in text
