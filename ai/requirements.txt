@@ -1,0 +1,10 @@
+fastapi==0.115.12
+pydantic==2.12.5
+uvicorn==0.34.2
+httpx==0.28.1
+pytest==8.3.5
+python-dotenv==1.1.1
+# Match the ML pin on the container runtime; keep the tested Python 3.14 build locally.
+numpy==2.2.6; python_version < "3.14"
+numpy==2.3.3; python_version >= "3.14"
+rank-bm25==0.2.2
