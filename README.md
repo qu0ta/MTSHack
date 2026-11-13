@@ -94,3 +94,9 @@ cd backend
 go test ./...
 go vet ./...
 ```
+
+### Проверка с Python FastAPI
+
+Задайте `AI_SOURCE` равным пути к каталогу `ai` рабочей копии AI-Engineer с поддержкой `lead_requested`. Команда `docker compose -f compose.yaml -f compose.fastapi.yaml up --build -d` собирает FastAPI из этого каталога. Для отдельного экземпляра FastAPI задайте его адрес из сети контейнера через `ML_SERVICE_URL`. Для сквозной проверки в каталоге `backend` должен быть Go-код с миграцией 002.
+
+В версии Go с поддержкой заявок клиент отправляет `POST /api/v1/chats/{id}/messages` с полем `content` и необязательным объектом `client_data`. После явного согласия пользователя передаёт `lead_requested: true`. Объект `application` в ответе означает, что PostgreSQL зафиксировал заявку. Сохранённая заявка доступна через `GET /api/v1/chats/{id}/application`. Параллельная отправка сообщения в занятый чат возвращает HTTP 409.
