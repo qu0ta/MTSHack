@@ -1,0 +1,10 @@
+.page { min-height: 75vh; padding: 60px 18px; }
+.page > span { color: var(--red); font: 500 10px var(--mono); }
+.page h1 { margin: 48px 0 28px; font: 600 clamp(3rem, 11vw, 8rem)/0.9 var(--display); letter-spacing: -0.075em; text-transform: uppercase; }
+.page h1 span { color: var(--red); }
+.page p { max-width: 420px; font-size: 17px; }
+.page div { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px; }
+.page a { padding: 14px 18px; border: 1px solid var(--ink); font: 500 10px var(--mono); text-decoration: none; text-transform: uppercase; }
+.page a { color: white; background: var(--red); border-color: var(--red); }
+@media (min-width: 720px) { .page { padding: 90px 32px; } }
+@media (min-width: 1120px) { .page { padding-inline: 48px; } }

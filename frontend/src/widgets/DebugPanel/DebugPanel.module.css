@@ -1,0 +1,12 @@
+.panel { padding: 16px 14px 22px; border-bottom: 1px solid var(--ink); background: var(--ink); color: white; }
+.panel dl { margin: 0; }
+.panel dl div { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #444; }
+.panel dt { color: #8d8d8d; font: 400 8px var(--mono); }
+.panel dd { margin: 0; font: 500 9px var(--mono); }
+.panel dd i { display: inline-block; width: 6px; height: 6px; margin-right: 4px; background: var(--red); }
+.sources { margin-top: 20px; }
+.sources > span { color: #8d8d8d; font: 400 8px var(--mono); }
+.sources ul { margin: 10px 0 0; padding: 0; list-style: none; }
+.sources li { display: flex; gap: 9px; padding: 8px 0; font: 400 9px var(--mono); overflow-wrap: anywhere; }
+.sources li b { color: var(--red); font-weight: 500; }
+.sources p { margin: 10px 0 0; color: #999; font-size: 12px; }
