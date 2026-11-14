@@ -1,0 +1,183 @@
+{
+  "info": {
+    "_postman_id": "4af72c96-e942-4ca2-884f-82d32c700001",
+    "name": "MTSHack API — Full Regression",
+    "description": "Последовательный regression-сценарий Go API. Запускайте всю коллекцию по порядку: chat_id сохраняется автоматически.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "base_url", "value": "http://localhost:8080"},
+    {"key": "chat_id", "value": ""}
+  ],
+  "item": [
+    {
+      "name": "01 — Service checks",
+      "item": [
+        {
+          "name": "Health",
+          "request": {"method": "GET", "header": [], "url": "{{base_url}}/health", "description": "Проверяет HTTP-процесс backend."},
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+            "pm.test('Status is ok', () => pm.expect(pm.response.json().status).to.eql('ok'));",
+            "pm.test('Responds under 2 seconds', () => pm.expect(pm.response.responseTime).to.be.below(2000));"
+          ]}}]
+        },
+        {
+          "name": "Ready",
+          "request": {"method": "GET", "header": [], "url": "{{base_url}}/ready", "description": "Проверяет backend и соединение с PostgreSQL."},
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+            "pm.test('Backend is ready', () => pm.expect(pm.response.json().status).to.eql('ready'));"
+          ]}}]
+        }
+      ]
+    },
+    {
+      "name": "02 — Chat lifecycle",
+      "item": [
+        {
+          "name": "Create chat",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"title\": \"Postman {{$timestamp}}\"\n}"},
+            "url": "{{base_url}}/api/v1/chats",
+            "description": "Создаёт чат и сохраняет UUID в chat_id."
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+            "pm.test('Created active chat', () => { const b = pm.response.json(); pm.expect(b.id).to.match(/^[0-9a-f-]{36}$/i); pm.expect(b.status).to.eql('active'); pm.expect(b.created_at).to.be.a('string'); });",
+            "const body = pm.response.json(); if (body.id) pm.collectionVariables.set('chat_id', body.id);"
+          ]}}]
+        },
+        {
+          "name": "Get created chat",
+          "request": {"method": "GET", "header": [], "url": "{{base_url}}/api/v1/chats/{{chat_id}}"},
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+            "pm.test('Returns created chat', () => { const b = pm.response.json(); pm.expect(b.id).to.eql(pm.collectionVariables.get('chat_id')); pm.expect(b.status).to.eql('active'); });"
+          ]}}]
+        },
+        {
+          "name": "List chats with pagination",
+          "request": {"method": "GET", "header": [], "url": "{{base_url}}/api/v1/chats?limit=10&offset=0"},
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+            "pm.test('Valid page', () => { const b = pm.response.json(); pm.expect(b.chats).to.be.an('array'); pm.expect(b.total).to.be.a('number'); pm.expect(b.limit).to.eql(10); pm.expect(b.offset).to.eql(0); });"
+          ]}}]
+        },
+        {
+          "name": "Update chat title",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"title\": \"Postman updated title\"\n}"},
+            "url": "{{base_url}}/api/v1/chats/{{chat_id}}"
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+            "pm.test('Title updated', () => pm.expect(pm.response.json().title).to.eql('Postman updated title'));"
+          ]}}]
+        }
+      ]
+    },
+    {
+      "name": "03 — Consultation and history",
+      "item": [
+        {
+          "name": "Send message and receive AI answer",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"content\": \"Как снизить расходы на электроэнергию?\"\n}"},
+            "url": "{{base_url}}/api/v1/chats/{{chat_id}}/messages",
+            "description": "Проверяет полный путь Go → ML → PostgreSQL."
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('HTTP 201', () => pm.response.to.have.status(201));",
+            "pm.test('User and assistant returned', () => { const b = pm.response.json(); pm.expect(b.user_message.role).to.eql('user'); pm.expect(b.assistant_message.role).to.eql('assistant'); pm.expect(b.assistant_message.content).to.be.a('string').and.not.empty; pm.expect(b.assistant_message.response_time_ms).to.be.a('number'); pm.expect(b.needs_manager).to.be.a('boolean'); });"
+          ]}}]
+        },
+        {
+          "name": "List stored messages",
+          "request": {"method": "GET", "header": [], "url": "{{base_url}}/api/v1/chats/{{chat_id}}/messages?limit=50&offset=0"},
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+            "pm.test('Both messages persisted', () => { const b = pm.response.json(); pm.expect(b.total).to.be.at.least(2); const roles = b.messages.map(m => m.role); pm.expect(roles).to.include('user'); pm.expect(roles).to.include('assistant'); });",
+            "pm.test('Pagination echoed', () => { const b = pm.response.json(); pm.expect(b.limit).to.eql(50); pm.expect(b.offset).to.eql(0); });"
+          ]}}]
+        }
+      ]
+    },
+    {
+      "name": "04 — Validation and errors",
+      "item": [
+        {
+          "name": "Reject unknown JSON field",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"content\": \"test\",\n  \"role\": \"assistant\"\n}"},
+            "url": "{{base_url}}/api/v1/chats/{{chat_id}}/messages"
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+            "pm.test('Invalid body reported', () => pm.expect(pm.response.text()).to.include('invalid request body'));"
+          ]}}]
+        },
+        {
+          "name": "Reject empty message",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"content\": \"   \"\n}"},
+            "url": "{{base_url}}/api/v1/chats/{{chat_id}}/messages"
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('HTTP 400', () => pm.response.to.have.status(400));",
+            "pm.test('Invalid content reported', () => pm.expect(pm.response.text()).to.include('invalid message content'));"
+          ]}}]
+        },
+        {
+          "name": "Reject invalid pagination",
+          "request": {"method": "GET", "header": [], "url": "{{base_url}}/api/v1/chats?limit=not-a-number"},
+          "event": [{"listen": "test", "script": {"exec": ["pm.test('HTTP 400', () => pm.response.to.have.status(400));"]}}]
+        },
+        {
+          "name": "Return 404 for missing chat",
+          "request": {"method": "GET", "header": [], "url": "{{base_url}}/api/v1/chats/00000000-0000-4000-8000-000000000000"},
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('HTTP 404', () => pm.response.to.have.status(404));",
+            "pm.test('Not found reported', () => pm.expect(pm.response.text()).to.include('chat not found'));"
+          ]}}]
+        }
+      ]
+    },
+    {
+      "name": "05 — Close chat",
+      "item": [
+        {
+          "name": "Close chat",
+          "request": {"method": "POST", "header": [], "url": "{{base_url}}/api/v1/chats/{{chat_id}}/close"},
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('HTTP 200', () => pm.response.to.have.status(200));",
+            "pm.test('Chat closed', () => { const b = pm.response.json(); pm.expect(b.status).to.eql('closed'); pm.expect(b.closed_at).to.be.a('string'); });"
+          ]}}]
+        },
+        {
+          "name": "Reject message in closed chat",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {"mode": "raw", "raw": "{\n  \"content\": \"Сообщение после закрытия\"\n}"},
+            "url": "{{base_url}}/api/v1/chats/{{chat_id}}/messages"
+          },
+          "event": [{"listen": "test", "script": {"exec": [
+            "pm.test('HTTP 409', () => pm.response.to.have.status(409));",
+            "pm.test('Closed chat reported', () => pm.expect(pm.response.text()).to.include('chat is closed'));"
+          ]}}]
+        }
+      ]
+    }
+  ]
+}

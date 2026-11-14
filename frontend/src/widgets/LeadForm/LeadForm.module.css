@@ -1,0 +1,23 @@
+.overlay { position: absolute; z-index: 5; inset: 0; min-height: 100%; color: var(--ink); background: var(--paper-light); }
+.top { display: flex; justify-content: space-between; align-items: center; height: 48px; padding: 0 14px; border-bottom: 1px solid var(--ink); font: 500 9px var(--mono); }
+.top button { border: 0; background: transparent; font-size: 24px; cursor: pointer; }
+.form, .success { padding: 28px 18px; }
+.form > span { color: var(--red); font: 500 9px var(--mono); }
+.form h2, .success h2 { margin: 20px 0 30px; font: 600 2rem/0.95 var(--display); letter-spacing: -0.06em; text-transform: uppercase; }
+.form label:not(.consent) { display: grid; gap: 8px; margin-bottom: 18px; font: 500 9px var(--mono); text-transform: uppercase; }
+.form input[type='text'], .form input:not([type]) { width: 100%; padding: 11px 0; border: 0; border-bottom: 1px solid var(--ink); outline: 0; background: transparent; }
+.form input[aria-invalid='true'] { border-color: var(--red); }
+.form small { color: var(--red); font: 400 9px var(--mono); }
+.consent { display: grid; grid-template-columns: 18px 1fr; gap: 10px; margin: 22px 0 8px; font-size: 12px; line-height: 1.35; }
+.consent input { width: 16px; height: 16px; accent-color: var(--red); }
+.form > button, .success > button { display: flex; justify-content: space-between; width: 100%; margin-top: 24px; padding: 14px; border: 1px solid var(--ink); color: white; background: var(--ink); font: 500 10px var(--mono); cursor: pointer; text-transform: uppercase; }
+.form > button:hover, .success > button:hover { border-color: var(--red); background: var(--red); }
+.success > span { display: grid; place-items: center; width: 42px; height: 42px; color: white; background: var(--red); font-size: 22px; }
+.success p { color: var(--muted); line-height: 1.45; }
+.success div { margin-top: 24px; padding: 14px; border: 1px solid var(--ink); font-size: 13px; line-height: 1.4; }
+.success div b { display: block; margin-bottom: 8px; color: var(--red); font: 500 8px var(--mono); }
+
+@media (max-width: 899px) {
+  .overlay { position: fixed; top: 0; z-index: 50; overflow-y: auto; }
+  .form, .success { max-width: 520px; margin-inline: auto; padding-top: 52px; }
+}

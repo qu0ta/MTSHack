@@ -1,3 +1,4 @@
+# --- From ml-engineer branch ---
 venv/
 __pycache__/
 *.pyc
@@ -7,3 +8,17 @@ submission*.csv
 submission*.zip
 .env
 *.log
+
+# --- From main branch ---
+.idea/
+.vscode/
+.env.*
+!.env.example
+bin/
+dist/
+tmp/
+.DS_Store
+.pytest_cache/
+.venv/
+node_modules/
+coverage/

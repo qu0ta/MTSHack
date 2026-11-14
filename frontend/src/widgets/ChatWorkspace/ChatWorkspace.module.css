@@ -1,0 +1,82 @@
+.workspace {
+  display: grid;
+  border: 1px solid var(--ink);
+  background-color: var(--paper-light);
+}
+
+.chat { min-width: 0; }
+.chatTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--ink);
+  font: 500 9px var(--mono);
+}
+
+.chatTop div { display: flex; align-items: center; gap: 8px; }
+.chatTop i { width: 7px; height: 7px; background: var(--red); }
+.chatTop button { padding: 8px 0; border: 0; color: var(--muted); background: transparent; font: 500 9px var(--mono); text-transform: uppercase; cursor: pointer; }
+
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  height: 430px;
+  padding: 22px 14px;
+  overflow-y: auto;
+  background-color: var(--paper-light);
+  background-image: linear-gradient(to right, rgba(23, 23, 23, 0.055) 1px, transparent 1px), linear-gradient(to bottom, rgba(23, 23, 23, 0.055) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+
+.message { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 10px; align-items: start; animation: enter 240ms ease both; }
+.message > span { padding-top: 7px; color: var(--muted); font: 500 9px var(--mono); }
+.message p { width: fit-content; max-width: 680px; margin: 0; padding: 13px 15px; border: 1px solid var(--ink); background: var(--paper-light); line-height: 1.5; }
+.assistant { align-self: start; }
+.user { align-self: end; width: min(88%, 640px); }
+.user > span { color: var(--red); }
+.user p { color: white; background: var(--ink); }
+
+.typing { display: flex; gap: 5px; margin-left: 52px; padding: 14px; width: fit-content; border: 1px solid var(--ink); background: var(--paper-light); }
+.typing i { width: 6px; height: 6px; background: var(--red); animation: blink 1s infinite; }
+.typing i:nth-child(2) { animation-delay: 120ms; }
+.typing i:nth-child(3) { animation-delay: 240ms; }
+
+.prompts { display: grid; padding: 0 14px 16px 56px; gap: 7px; }
+.prompts button { display: flex; justify-content: space-between; padding: 11px 13px; border: 1px solid var(--line); color: var(--ink); background: transparent; text-align: left; cursor: pointer; }
+.prompts button:hover { border-color: var(--red); color: var(--red); }
+
+.composer { position: relative; display: grid; grid-template-columns: 1fr 52px; border-top: 1px solid var(--ink); }
+.composer label { position: absolute; width: 1px; height: 1px; clip: rect(0 0 0 0); overflow: hidden; }
+.composer textarea { min-height: 76px; padding: 15px 14px; border: 0; outline: 0; resize: none; color: var(--ink); background: var(--paper-light); }
+.composer textarea::placeholder { color: #99958d; }
+.composer button { border: 0; border-left: 1px solid var(--ink); color: white; background: var(--red); font-size: 24px; cursor: pointer; transition: background 180ms ease; }
+.composer button:hover:not(:disabled) { background: var(--ink); }
+.composer button:disabled { color: #827f78; background: #d3cfc5; cursor: not-allowed; }
+
+.rail { position: relative; border-top: 1px solid var(--ink); background: #e6e2d8; }
+.debugButton { display: flex; justify-content: space-between; width: 100%; padding: 16px 14px; border: 0; border-bottom: 1px solid var(--ink); background: transparent; font: 500 10px var(--mono); cursor: pointer; text-transform: uppercase; }
+.debugButton span { display: flex; align-items: center; gap: 8px; }
+.debugButton i { width: 7px; height: 7px; background: var(--red); }
+.debugButton b { font-size: 18px; font-weight: 400; }
+
+.handoff { padding: 34px 14px 18px; }
+.handoff > span { color: var(--red); font: 500 9px var(--mono); }
+.handoff h2 { margin: 22px 0 14px; font: 600 2rem/0.95 var(--display); letter-spacing: -0.055em; }
+.handoff p { margin: 0 0 24px; color: var(--muted); font-size: 14px; line-height: 1.45; }
+.handoff button { display: flex; justify-content: space-between; width: 100%; padding: 14px; border: 1px solid var(--ink); color: white; background: var(--ink); font: 500 10px var(--mono); cursor: pointer; text-transform: uppercase; }
+.handoff button:hover { border-color: var(--red); background: var(--red); }
+
+@keyframes enter { from { opacity: 0; transform: translateY(8px); } }
+@keyframes blink { 50% { opacity: 0.2; } }
+
+@media (min-width: 900px) {
+  .workspace { grid-template-columns: minmax(0, 1fr) 300px; }
+  .rail { border-top: 0; border-left: 1px solid var(--ink); }
+  .feed { height: 540px; padding: 28px 22px; }
+  .prompts { padding-inline: 74px 22px; }
+  .composer textarea { padding-inline: 22px; }
+  .handoff { padding: 60px 20px 20px; }
+}

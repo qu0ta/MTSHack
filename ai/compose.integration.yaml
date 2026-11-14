@@ -1,0 +1,39 @@
+# Apply over the team's root compose.yaml; paths resolve relative to that base file.
+# Requires Docker Compose >= 2.24.4 for !override.
+services:
+  backend:
+    environment:
+      ML_SERVICE_URL: http://ml-service:8000
+    depends_on:
+      ml-service:
+        condition: service_healthy
+
+  ml-service:
+    image: mtshack-fastapi:local
+    build:
+      context: ${AI_SOURCE:-./ai}
+      dockerfile: Dockerfile
+      dockerfile_inline: !reset null
+    entrypoint: !reset null
+    command: ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    env_file:
+      - path: ${AI_ENV_FILE:-./ai/.env}
+        required: true
+    environment:
+      KB_PATH: /knowledge-base
+      ML_MODULE: app.ml.rag_api
+      PYTHONUNBUFFERED: "1"
+    volumes: !override
+      - type: bind
+        source: ${KB_SOURCE:?Set KB_SOURCE to an absolute path to the private knowledge-base directory or ZIP}
+        target: /knowledge-base
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 120s
+    init: true

@@ -1,0 +1,15 @@
+{
+  "version": "2026-11-13-site1",
+  "files": {
+    "solution.py": "956218ba3731930f7da82a7c76944f9d3df01b5f3eaa5679a21802d8a9bc4323",
+    "rag_api.py": "a633a40647ece3dc412bb3f251a033b1fd3003e7e5c482ead7804cbfec73ddea"
+  },
+  "contest_prompt_matches_previous": true,
+  "contest_prompt_sha256": "8d1acdad2486c8693d7a38dd101e5313fb57fc54054bab2ed41ff41468a74d16",
+  "upstream_commit": "8752b81fc7d1d5b6f1443fcba8083a6924c23555",
+  "upstream_branch": "ml-engineer",
+  "upstream_blobs": {
+    "solution.py": "a0d521e9ef6fe6420d6bdea35742212168c92e88",
+    "rag_api.py": "9c15286b025b14b2788fe84fa5f05510b4b029ef"
+  }
+}
