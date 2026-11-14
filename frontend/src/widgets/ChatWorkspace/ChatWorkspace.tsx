@@ -140,7 +140,7 @@ export function ChatWorkspace() {
         <div className={styles.handoff}>
           <span>НУЖЕН РАСЧЁТ?</span><h2>Передать эксперту</h2>
           <p>Оставьте контакт, чтобы сохранить заявку с кратким описанием задачи.</p>
-          <button type="button" onClick={() => setLeadOpen(true)} disabled={disabled}>Заявка менеджеру <b>↗</b></button>
+          <button type="button" onClick={() => setLeadOpen(true)} disabled={pending || loading || closed}>Заявка менеджеру <b>↗</b></button>
         </div>
         {leadOpen && <LeadForm application={application} pending={pending || loading} error={error} uncertain={uncertain} onRefresh={() => void refresh()} onClose={() => setLeadOpen(false)} onSubmit={(lead) => void send('Прошу связаться со мной по вопросу консультации.', lead)} />}
       </aside>

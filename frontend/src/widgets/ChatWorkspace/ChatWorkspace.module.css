@@ -34,7 +34,10 @@
 .message { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 10px; align-items: start; animation: enter 240ms ease both; }
 .message > span { padding-top: 7px; color: var(--muted); font: 500 9px var(--mono); }
 .message p { width: fit-content; max-width: 680px; margin: 0; padding: 13px 15px; border: 1px solid var(--ink); background: var(--paper-light); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
-.error { padding: 12px; border: 1px solid var(--red); background: var(--paper-light); line-height: 1.4; }
+.error { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--red); background: var(--paper-light); line-height: 1.4; }
+.error button { padding: 9px 14px; border: 1px solid var(--ink); color: var(--ink); background: transparent; font: 500 11px var(--mono); cursor: pointer; }
+.error button:hover:not(:disabled) { color: white; background: var(--ink); }
+.error button:disabled { color: var(--muted); border-color: var(--line); cursor: wait; }
 .assistant { align-self: start; }
 .user { align-self: end; width: min(88%, 640px); }
 .user > span { color: var(--red); }
@@ -52,6 +55,7 @@
 .composer { position: relative; display: grid; grid-template-columns: 1fr 52px; border-top: 1px solid var(--ink); }
 .composer label { position: absolute; width: 1px; height: 1px; clip: rect(0 0 0 0); overflow: hidden; }
 .composer textarea { min-height: 76px; padding: 15px 14px; border: 0; outline: 0; resize: none; color: var(--ink); background: var(--paper-light); }
+.composer textarea:focus-visible { outline: 2px solid var(--red); outline-offset: -3px; }
 .composer textarea::placeholder { color: #99958d; }
 .composer button { border: 0; border-left: 1px solid var(--ink); color: white; background: var(--red); font-size: 24px; cursor: pointer; transition: background 180ms ease; }
 .composer button:hover:not(:disabled) { background: var(--ink); }
@@ -68,7 +72,8 @@
 .handoff h2 { margin: 22px 0 14px; font: 600 2rem/0.95 var(--display); letter-spacing: -0.055em; }
 .handoff p { margin: 0 0 24px; color: var(--muted); font-size: 14px; line-height: 1.45; }
 .handoff button { display: flex; justify-content: space-between; width: 100%; padding: 14px; border: 1px solid var(--ink); color: white; background: var(--ink); font: 500 10px var(--mono); cursor: pointer; text-transform: uppercase; }
-.handoff button:hover { border-color: var(--red); background: var(--red); }
+.handoff button:hover:not(:disabled) { border-color: var(--red); background: var(--red); }
+.handoff button:disabled { color: #827f78; border-color: var(--line); background: #d3cfc5; cursor: not-allowed; }
 
 @keyframes enter { from { opacity: 0; transform: translateY(8px); } }
 @keyframes blink { 50% { opacity: 0.2; } }
