@@ -1,32 +1,15 @@
-import type { ChatMessage } from '../../chat/model/chatReducer'
-
-export interface LeadData {
-  name: string
-  contact: string
-  consent: boolean
-}
-
+export type LeadData = { name: string; phone: string; company: string; consent: boolean }
 export type LeadErrors = Partial<Record<keyof LeadData, string>>
 
 export function validateLead(lead: LeadData): LeadErrors {
   const errors: LeadErrors = {}
-  const contact = lead.contact.trim()
-  const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)
-  const isPhone = contact.replace(/\D/g, '').length >= 10
-
   if (!lead.name.trim()) errors.name = 'Укажите имя'
-  if (!contact) errors.contact = 'Укажите телефон или email'
-  else if (!isEmail && !isPhone) errors.contact = 'Проверьте телефон или email'
+  else if (Array.from(lead.name.trim()).length > 255) errors.name = 'Не больше 255 символов'
+  if (!lead.company.trim()) errors.company = 'Укажите компанию'
+  else if (Array.from(lead.company.trim()).length > 255) errors.company = 'Не больше 255 символов'
+  const phone = lead.phone.trim()
+  if (!phone) errors.phone = 'Укажите телефон'
+  else if (Array.from(phone).length > 30 || !/^\+?[\d\s()-]+$/.test(phone) || phone.replace(/\D/g, '').length < 10) errors.phone = 'Проверьте номер телефона'
   if (!lead.consent) errors.consent = 'Нужно согласие на обработку данных'
-
   return errors
-}
-
-export function buildLeadSummary(messages: ChatMessage[]): string {
-  return messages
-    .filter((message) => message.role === 'user')
-    .slice(-3)
-    .map((message) => message.text.trim())
-    .filter(Boolean)
-    .join(' · ')
 }

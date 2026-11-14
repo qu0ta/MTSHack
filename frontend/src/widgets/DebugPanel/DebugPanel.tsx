@@ -1,24 +1,19 @@
-import type { AssistantReply } from '../../features/chat/model/assistantEngine'
+import type { Message } from '../../features/chat/api/assistantService'
 import styles from './DebugPanel.module.css'
 
-interface DebugPanelProps {
-  reply: AssistantReply | null
-}
-
-export function DebugPanel({ reply }: DebugPanelProps) {
+export function DebugPanel({ messages }: { messages: Message[] }) {
+  const replies = messages.filter((message) => message.role === 'assistant')
   return (
     <div className={styles.panel}>
-      <dl>
-        <div><dt>STATUS</dt><dd><i /> {reply ? 'READY' : 'WAITING'}</dd></div>
-        <div><dt>ВРЕМЯ ОТВЕТА</dt><dd>{reply ? `${reply.responseTimeMs} MS` : '-'}</dd></div>
-        <div><dt>TOPIC</dt><dd>{reply?.topic.toUpperCase() ?? '-'}</dd></div>
-      </dl>
-      <div className={styles.sources}>
-        <span>KNOWLEDGE SOURCES</span>
-        {reply?.sources.length ? (
-          <ul>{reply.sources.map((source, index) => <li key={source}><b>{String(index + 1).padStart(2, '0')}</b>{source}</li>)}</ul>
-        ) : <p>Источники появятся после первого ответа.</p>}
-      </div>
+      {!replies.length && <p>Источники появятся после первого ответа.</p>}
+      {replies.map((message) => (
+        <div className={styles.sources} key={message.id}>
+          <span>AI-{String(messages.findIndex((item) => item.id === message.id) + 1).padStart(2, '0')} / {message.response_time_ms == null ? 'ВРЕМЯ НЕ УКАЗАНО' : `${message.response_time_ms} МС`}</span>
+          {message.metadata?.sources?.length ? (
+            <ul>{message.metadata.sources.map((source, i) => <li key={i}><b>{String(i + 1).padStart(2, '0')}</b>{source.document}</li>)}</ul>
+          ) : <p>Источники не указаны.</p>}
+        </div>
+      ))}
     </div>
   )
 }

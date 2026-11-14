@@ -5,7 +5,7 @@
 .form > span { color: var(--red); font: 500 9px var(--mono); }
 .form h2, .success h2 { margin: 20px 0 30px; font: 600 2rem/0.95 var(--display); letter-spacing: -0.06em; text-transform: uppercase; }
 .form label:not(.consent) { display: grid; gap: 8px; margin-bottom: 18px; font: 500 9px var(--mono); text-transform: uppercase; }
-.form input[type='text'], .form input:not([type]) { width: 100%; padding: 11px 0; border: 0; border-bottom: 1px solid var(--ink); outline: 0; background: transparent; }
+.form input[type='text'], .form input[type='tel'], .form input:not([type]) { width: 100%; padding: 11px 0; border: 0; border-bottom: 1px solid var(--ink); outline: 0; background: transparent; }
 .form input[aria-invalid='true'] { border-color: var(--red); }
 .form small { color: var(--red); font: 400 9px var(--mono); }
 .consent { display: grid; grid-template-columns: 18px 1fr; gap: 10px; margin: 22px 0 8px; font-size: 12px; line-height: 1.35; }
