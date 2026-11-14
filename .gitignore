@@ -1,16 +1,24 @@
+# --- From ml-engineer branch ---
+venv/
+__pycache__/
+*.pyc
+data/
+chunks.jsonl
+submission*.csv
+submission*.zip
+.env
+*.log
+
+# --- From main branch ---
 .idea/
 .vscode/
-.env
 .env.*
 !.env.example
 bin/
 dist/
 tmp/
-*.log
 .DS_Store
-__pycache__/
 .pytest_cache/
 .venv/
-venv/
 node_modules/
 coverage/
