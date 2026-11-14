@@ -24,7 +24,34 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
-      start_period: 5s
+      start_period: 10s
+    init: true
+    restart: unless-stopped
+
+  ml-service:
+    build:
+      context: ./ai
+      dockerfile: Dockerfile
+    env_file:
+      - ./ai/.env
+    environment:
+      KB_PATH: /opt/mtshack/knowledge-base.zip
+      ML_MODULE: app.ml.rag_api
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "${ML_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=5)"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 120s
     init: true
     restart: unless-stopped
 
@@ -39,7 +66,11 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"
+        ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -58,21 +89,6 @@ services:
       postgres:
         condition: service_healthy
     restart: "no"
-
-  ml-service:
-    image: wiremock/wiremock:3.13.1-alpine
-    command: ["--port", "8000", "--disable-banner"]
-    ports:
-      - "${ML_PORT:-8000}:8000"
-    volumes:
-      - ./docker/ml-mock:/home/wiremock:ro
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8000/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-      start_period: 5s
-    restart: unless-stopped
 
 volumes:
   postgres_data:
