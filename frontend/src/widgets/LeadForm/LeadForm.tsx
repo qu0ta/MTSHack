@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { validateLead, type LeadData, type LeadErrors } from '../../features/lead/model/lead'
+import { formatPhone, validateLead, type LeadData, type LeadErrors } from '../../features/lead/model/lead'
 import type { Application } from '../../features/chat/api/assistantService'
 import styles from './LeadForm.module.css'
 
@@ -14,7 +14,7 @@ type Props = {
 }
 
 export function LeadForm({ application, pending, error, uncertain, onSubmit, onClose, onRefresh }: Props) {
-  const [lead, setLead] = useState<LeadData>({ name: application?.full_name ?? '', phone: application?.phone ?? '', company: application?.company ?? '', consent: false })
+  const [lead, setLead] = useState<LeadData>({ name: application?.full_name ?? '', phone: formatPhone(application?.phone ?? ''), company: application?.company ?? '', consent: false })
   const [errors, setErrors] = useState<LeadErrors>({})
   const dialog = useRef<HTMLDivElement>(null)
 
@@ -59,7 +59,34 @@ export function LeadForm({ application, pending, error, uncertain, onSubmit, onC
             {errors.name && <small id="lead-name-error">{errors.name}</small>}
           </label>
           <label>Телефон
-            <input type="tel" value={lead.phone} onChange={(event) => setLead({ ...lead, phone: event.target.value })} aria-invalid={Boolean(errors.phone)} aria-describedby={errors.phone ? 'lead-phone-error' : undefined} />
+            <input type="tel" inputMode="tel" autoComplete="tel" placeholder="+7 (999) 123-45-67" value={lead.phone} onChange={(event) => {
+              const input = event.currentTarget
+              let digitsBefore = input.value.slice(0, input.selectionStart ?? input.value.length).replace(/\D/g, '').length
+              if (!input.value.trim().startsWith('+7') && input.value.replace(/\D/g, '').length <= 10) digitsBefore += 1
+              const formatted = formatPhone(input.value)
+              setLead({ ...lead, phone: formatted })
+              requestAnimationFrame(() => {
+                if (document.activeElement !== input) return
+                let count = 0
+                let position = 0
+                while (position < formatted.length && count < digitsBefore) {
+                  if (/\d/.test(formatted[position])) count += 1
+                  position += 1
+                }
+                input.setSelectionRange(position, position)
+              })
+            }} onKeyDown={(event) => {
+              const input = event.currentTarget
+              const position = input.selectionStart
+              if (event.key !== 'Backspace' || position == null || position !== input.selectionEnd || position <= 2 || /\d/.test(input.value[position - 1])) return
+              event.preventDefault()
+              let digit = position - 1
+              while (digit > 1 && !/\d/.test(input.value[digit])) digit -= 1
+              if (digit <= 1) return
+              const formatted = formatPhone(input.value.slice(0, digit) + input.value.slice(digit + 1))
+              setLead({ ...lead, phone: formatted })
+              requestAnimationFrame(() => input.setSelectionRange(digit, digit))
+            }} aria-invalid={Boolean(errors.phone)} aria-describedby={errors.phone ? 'lead-phone-error' : undefined} />
             {errors.phone && <small id="lead-phone-error">{errors.phone}</small>}
           </label>
           <label>Компания

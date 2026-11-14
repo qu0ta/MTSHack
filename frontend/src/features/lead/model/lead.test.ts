@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { validateLead } from './lead'
+import { formatPhone, validateLead } from './lead'
 
 describe('validateLead', () => {
   it('принимает имя, компанию, телефон и согласие', () => {
-    expect(validateLead({ name: 'Анна', company: 'ООО Тест', phone: '+7 900 000-00-00', consent: true })).toEqual({})
+    expect(validateLead({ name: 'Анна', company: 'ООО Тест', phone: '+7 (900) 000-00-00', consent: true })).toEqual({})
   })
 
   it('требует заполнить контактные данные и согласие', () => {
@@ -11,6 +11,18 @@ describe('validateLead', () => {
   })
 
   it('не принимает email в поле телефона', () => {
-    expect(validateLead({ name: 'Анна', company: 'ООО Тест', phone: 'user@example.com', consent: true }).phone).toBe('Проверьте номер телефона')
+    expect(validateLead({ name: 'Анна', company: 'ООО Тест', phone: 'user@example.com', consent: true }).phone).toBe('Введите номер полностью')
+  })
+})
+
+describe('formatPhone', () => {
+  it.each([
+    ['9001234567', '+7 (900) 123-45-67'],
+    ['89001234567', '+7 (900) 123-45-67'],
+    ['+7 900 123 45 67', '+7 (900) 123-45-67'],
+    ['+7 (900) 1', '+7 (900) 1'],
+    ['', ''],
+  ])('форматирует %s как %s', (value, expected) => {
+    expect(formatPhone(value)).toBe(expected)
   })
 })
